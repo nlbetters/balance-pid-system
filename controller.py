@@ -14,7 +14,10 @@ except ImportError:
     PCA9685 = None
     ServoKit = None
 
-def clamp(value, lower=19, upper=90):
+MIN_SERVO_ANGLE = 19
+MAX_SERVO_ANGLE = 90
+
+def clamp(value, lower=MIN_SERVO_ANGLE, upper=MAX_SERVO_ANGLE):
     return max(lower, min(value, upper))
 
 class RobotController:
@@ -53,6 +56,14 @@ class RobotController:
         self.s3.angle = clamp(theta3)
         if theta4 is not None:
             self.s4.angle = clamp(theta4)
+
+    def get_motor_angles(self):
+        return [
+            getattr(self.s1, "angle", None),
+            getattr(self.s2, "angle", None),
+            getattr(self.s3, "angle", None),
+            getattr(self.s4, "angle", None)
+        ]
 
     def interpolate_time(self, target_angles, steps=100, duration=0.3, individual_durations=None):
         current_angles = [self.s1.angle, self.s2.angle, self.s3.angle, self.s4.angle]
