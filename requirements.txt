@@ -1,0 +1,10 @@
+flask
+Flask-Cors
+numpy
+opencv-python
+picamera2
+adafruit-circuitpython-servokit
+adafruit-circuitpython-pca9685
+adafruit-blinka
+pyqt5
+pyqtgraph
