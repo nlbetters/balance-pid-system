@@ -14,8 +14,9 @@ except ImportError:
     PCA9685 = None
     ServoKit = None
 
-MIN_SERVO_ANGLE = 19
-MAX_SERVO_ANGLE = 90
+MIN_SERVO_ANGLE = 40
+MAX_SERVO_ANGLE = 140
+DEFAULT_SERVO_ANGLE = 90
 
 def clamp(value, lower=MIN_SERVO_ANGLE, upper=MAX_SERVO_ANGLE):
     return max(lower, min(value, upper))
@@ -43,8 +44,8 @@ class RobotController:
 
     def initialize(self):
         print("Initializing ...")
-        self.set_motor_angles(54, 54, 54, 54)
-        self.interpolate_time([19, 19, 19, 19], duration=0.25)
+        self.set_motor_angles(DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE)
+        self.interpolate_time([DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE], duration=0.25)
         time.sleep(1)
         self.Goto_time_spherical(0, 0, 8.26, t=0.25)
         time.sleep(1)
