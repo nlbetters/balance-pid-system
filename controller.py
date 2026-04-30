@@ -14,12 +14,38 @@ except ImportError:
     PCA9685 = None
     ServoKit = None
 
-MIN_SERVO_ANGLE = 40
-MAX_SERVO_ANGLE = 140
-DEFAULT_SERVO_ANGLE = 90
+MIN_SERVO_ANGLE = 0
+MAX_SERVO_ANGLE = 100
+DEFAULT_SERVO_ANGLE = 0
 
 def clamp(value, lower=MIN_SERVO_ANGLE, upper=MAX_SERVO_ANGLE):
     return max(lower, min(value, upper))
+
+def max_height_kinematic_theta(robot):
+    ax, az = robot.lp, robot.maxh
+    bx, bz = robot.lb, 0.0
+    dx = bx - ax
+    dz = bz - az
+    d = math.hypot(dx, dz)
+    a = (robot.l1**2 - robot.l2**2 + d**2) / (2 * d)
+    h = math.sqrt(max(0.0, robot.l1**2 - a**2))
+    p2x = ax + a * dx / d
+    p2z = az + a * dz / d
+    perp_x = -dz / d
+    perp_z = dx / d
+    c1 = [p2x + h * perp_x, p2z + h * perp_z]
+    c2 = [p2x - h * perp_x, p2z - h * perp_z]
+    cx, cz = max((c1, c2), key=lambda c: c[1])
+    return math.degrees(math.pi / 2 - math.atan2(cx - robot.lb, cz))
+
+def servo_angles_from_kinematics(robot):
+    zero_height_theta = max_height_kinematic_theta(robot)
+    return [
+        clamp(math.degrees(robot.theta1) - zero_height_theta),
+        clamp(math.degrees(robot.theta2) - zero_height_theta),
+        clamp(math.degrees(robot.theta3) - zero_height_theta),
+        clamp(math.degrees(robot.theta4) - zero_height_theta)
+    ]
 
 class RobotController:
     SERVO_CHANNELS = [0, 4, 8, 12]
@@ -112,42 +138,22 @@ class RobotController:
 
     def Goto_time_spherical(self, theta, phi, h, t=0.5):
         self.robot.solve_inverse_kinematics_spherical(theta, phi, h)
-        target_angles = [
-            math.degrees(math.pi*0.5 - self.robot.theta1),
-            math.degrees(math.pi*0.5 - self.robot.theta2),
-            math.degrees(math.pi*0.5 - self.robot.theta3),
-            math.degrees(math.pi*0.5 - self.robot.theta4)
-        ]
+        target_angles = servo_angles_from_kinematics(self.robot)
         self.interpolate_time(target_angles, duration=t)
 
     def Goto_time_vector(self, a, b, c, h, t=0.5):
         self.robot.solve_inverse_kinematics_vector(a, b, c, h)
-        target_angles = [
-            math.degrees(math.pi*0.5 - self.robot.theta1),
-            math.degrees(math.pi*0.5 - self.robot.theta2),
-            math.degrees(math.pi*0.5 - self.robot.theta3),
-            math.degrees(math.pi*0.5 - self.robot.theta4)
-        ]
+        target_angles = servo_angles_from_kinematics(self.robot)
         self.interpolate_time(target_angles, duration=t)
 
     def Goto_N_time_vector(self, a, b, c, h):
         self.robot.solve_inverse_kinematics_vector(a, b, c, h)
-        target_angles = [
-            math.degrees(math.pi*0.5 - self.robot.theta1),
-            math.degrees(math.pi*0.5 - self.robot.theta2),
-            math.degrees(math.pi*0.5 - self.robot.theta3),
-            math.degrees(math.pi*0.5 - self.robot.theta4)
-        ]
+        target_angles = servo_angles_from_kinematics(self.robot)
         self.set_motor_angles(*target_angles)
     
     def Goto_N_time_spherical(self, theta, phi, h):
         self.robot.solve_inverse_kinematics_spherical(theta, phi, h)
-        target_angles = [
-            math.degrees(math.pi*0.5 - self.robot.theta1),
-            math.degrees(math.pi*0.5 - self.robot.theta2),
-            math.degrees(math.pi*0.5 - self.robot.theta3),
-            math.degrees(math.pi*0.5 - self.robot.theta4)
-        ]
+        target_angles = servo_angles_from_kinematics(self.robot)
         self.set_motor_angles(*target_angles)
 
     def Dance1(self):
@@ -168,8 +174,5 @@ if __name__ == "__main__":
     model = RobotKinematics()
     rc = RobotController(model)
     time.sleep(0.5)
-
-
-
 
 

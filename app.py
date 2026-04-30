@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 import math
 from robotKinematics import RobotKinematics
-from controller import RobotController
+from controller import RobotController, servo_angles_from_kinematics
 
 app = Flask(__name__)
 CORS(app)
@@ -62,12 +62,7 @@ def update_robot():
 
         max_theta_for_h = robot.max_theta(h)
         robot.solve_inverse_kinematics_vector(alpha, beta, gamma, h)
-        rc.set_motor_angles(
-            math.degrees(math.pi*0.5 - robot.theta1),
-            math.degrees(math.pi*0.5 - robot.theta2),
-            math.degrees(math.pi*0.5 - robot.theta3),
-            math.degrees(math.pi*0.5 - robot.theta4)
-        )
+        rc.set_motor_angles(*servo_angles_from_kinematics(robot))
     except Exception:
         pass
 
