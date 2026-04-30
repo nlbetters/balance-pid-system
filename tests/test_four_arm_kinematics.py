@@ -5,7 +5,7 @@ import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from controller import RobotController, servo_angles_from_kinematics
+from controller import RobotController, clamp, servo_angles_from_kinematics
 from robotKinematics import RobotKinematics
 
 
@@ -41,6 +41,9 @@ class TestFourArmKinematics(unittest.TestCase):
         self.robot.theta4 = math.radians(500)
 
         self.assertEqual(servo_angles_from_kinematics(self.robot), [100, 100, 100, 100])
+
+    def test_servo_safety_clamp_rejects_negative_offset_result(self):
+        self.assertEqual(clamp(0 - 4), 0)
 
     def test_x_axis_tilt_moves_opposite_pair_against_each_other(self):
         servo0, servo4, servo8, servo12 = self.solve_servo_angles(5, 0)

@@ -78,7 +78,7 @@ class RobotController:
         print("Initialized!")
     
     def set_motor_angles(self, theta1, theta2, theta3, theta4=None):
-        self.s1.angle = clamp(theta1) - 4
+        self.s1.angle = clamp(theta1 - 4)
         self.s2.angle = clamp(theta2)
         self.s3.angle = clamp(theta3)
         if theta4 is not None:
@@ -174,5 +174,4 @@ if __name__ == "__main__":
     model = RobotKinematics()
     rc = RobotController(model)
     time.sleep(0.5)
-
 
