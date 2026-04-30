@@ -63,8 +63,8 @@ class TestFourArmKinematics(unittest.TestCase):
     def test_servo_safety_clamp_rejects_negative_offset_result(self):
         self.assertEqual(apply_servo_calibration(0, 0), 0)
 
-    def test_channel_8_servo_response_is_reversed_in_final_calibration(self):
-        self.assertGreater(
+    def test_channel_8_servo_response_is_not_reversed_by_default(self):
+        self.assertLess(
             apply_servo_calibration(20, 2),
             apply_servo_calibration(70, 2)
         )
