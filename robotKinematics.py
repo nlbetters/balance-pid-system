@@ -9,7 +9,7 @@ class RobotKinematics:
         self.l1 = l1    # Top Arm
         self.l2 = l2    # Bottom Arm
         self.lb = lb    # Radius of Bottom
-        self.invert = invert    # Whether the arm stays inward or outward
+        self.invert = invert    # False selects outward elbows; True selects inward elbows.
 
         self.maxh = self.compute_maxh() - 0.2
         self.minh = self.compute_minh() + 0.45
@@ -102,9 +102,17 @@ class RobotKinematics:
         else:
             raise ValueError("Unsupported leg axis")
 
+        bx, by = B[0], B[1]
+        base_radius = math.hypot(bx, by)
+        if base_radius < 1e-9:
+            raise ValueError("Base point cannot be at platform center")
+
+        def radial_position(candidate):
+            return (candidate[0] * bx + candidate[1] * by) / base_radius
+
         if self.invert:
-            return min(candidates, key=lambda c: c[2])
-        return max(candidates, key=lambda c: c[2])
+            return min(candidates, key=radial_position)
+        return max(candidates, key=radial_position)
 
     def _compute_theta(self, C):
         horizontal = math.sqrt(C[0]**2 + C[1]**2)

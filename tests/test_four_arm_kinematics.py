@@ -28,6 +28,19 @@ class TestFourArmKinematics(unittest.TestCase):
             self.assertLessEqual(angle, 100)
             self.assertTrue(math.isclose(angle, angles[0], abs_tol=1e-6))
 
+    def test_default_kinematics_uses_outward_elbow_branch(self):
+        self.robot.solve_inverse_kinematics_spherical(0, 0, 8.26)
+
+        for base, middle in (
+            (self.robot.B1, self.robot.C1),
+            (self.robot.B2, self.robot.C2),
+            (self.robot.B3, self.robot.C3),
+            (self.robot.B4, self.robot.C4),
+        ):
+            base_radius = math.hypot(base[0], base[1])
+            middle_radius = math.hypot(middle[0], middle[1])
+            self.assertGreater(middle_radius, base_radius)
+
     def test_max_height_maps_to_zero_servo_angle(self):
         angles = self.solve_servo_angles(0, 0, h=self.robot.maxh)
 
@@ -35,10 +48,10 @@ class TestFourArmKinematics(unittest.TestCase):
             self.assertTrue(math.isclose(angle, 0, abs_tol=1e-6))
 
     def test_servo_angles_are_capped_at_safety_limit(self):
-        self.robot.theta1 = math.radians(500)
-        self.robot.theta2 = math.radians(500)
-        self.robot.theta3 = math.radians(500)
-        self.robot.theta4 = math.radians(500)
+        self.robot.theta1 = math.radians(-500)
+        self.robot.theta2 = math.radians(-500)
+        self.robot.theta3 = math.radians(-500)
+        self.robot.theta4 = math.radians(-500)
 
         self.assertEqual(servo_angles_from_kinematics(self.robot), [100, 100, 100, 100])
 

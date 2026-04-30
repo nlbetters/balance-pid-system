@@ -35,16 +35,20 @@ def max_height_kinematic_theta(robot):
     perp_z = dx / d
     c1 = [p2x + h * perp_x, p2z + h * perp_z]
     c2 = [p2x - h * perp_x, p2z - h * perp_z]
-    cx, cz = max((c1, c2), key=lambda c: c[1])
+    if robot.invert:
+        cx, cz = min((c1, c2), key=lambda c: c[0])
+    else:
+        cx, cz = max((c1, c2), key=lambda c: c[0])
     return math.degrees(math.pi / 2 - math.atan2(cx - robot.lb, cz))
 
 def servo_angles_from_kinematics(robot):
     zero_height_theta = max_height_kinematic_theta(robot)
+    direction = 1 if robot.invert else -1
     return [
-        clamp(math.degrees(robot.theta1) - zero_height_theta),
-        clamp(math.degrees(robot.theta2) - zero_height_theta),
-        clamp(math.degrees(robot.theta3) - zero_height_theta),
-        clamp(math.degrees(robot.theta4) - zero_height_theta)
+        clamp(direction * (math.degrees(robot.theta1) - zero_height_theta)),
+        clamp(direction * (math.degrees(robot.theta2) - zero_height_theta)),
+        clamp(direction * (math.degrees(robot.theta3) - zero_height_theta)),
+        clamp(direction * (math.degrees(robot.theta4) - zero_height_theta))
     ]
 
 class RobotController:
