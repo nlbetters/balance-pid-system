@@ -10,7 +10,7 @@ SERVO_SWEEP_ANGLES = [20, 45, 70]
 RUNTIME_SECONDS = 2
 
 try:
-    from controller import RobotController
+    from controller import RobotController, apply_servo_calibration
     from robotKinematics import RobotKinematics
 except Exception as exc:
     print("Failed to import project modules:", exc)
@@ -30,7 +30,11 @@ if __name__ == "__main__":
             targets = [45, 45, 45, 45]
             targets[channel_index] = angle
             rc.set_motor_angles(*targets)
-            print(f"Targets: {targets}; reported: {rc.get_motor_angles()}")
+            final_angle = apply_servo_calibration(angle, channel_index)
+            print(
+                f"Targets: {targets}; channel {channel} final command: {final_angle}; "
+                f"reported: {rc.get_motor_angles()}"
+            )
             time.sleep(RUNTIME_SECONDS)
 
     print("Servo command script finished.")

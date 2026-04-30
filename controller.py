@@ -17,9 +17,18 @@ except ImportError:
 MIN_SERVO_ANGLE = 0
 MAX_SERVO_ANGLE = 100
 DEFAULT_SERVO_ANGLE = 35
+SERVO_OFFSETS = [-4, 0, 0, 0]
+SERVO_DIRECTIONS = [1, 1, -1, 1]
+SERVO_DIRECTION_PIVOT = DEFAULT_SERVO_ANGLE
 
 def clamp(value, lower=MIN_SERVO_ANGLE, upper=MAX_SERVO_ANGLE):
     return max(lower, min(value, upper))
+
+def apply_servo_calibration(angle, servo_index):
+    directed_angle = SERVO_DIRECTION_PIVOT + (
+        SERVO_DIRECTIONS[servo_index] * (angle - SERVO_DIRECTION_PIVOT)
+    )
+    return clamp(directed_angle + SERVO_OFFSETS[servo_index])
 
 def max_height_kinematic_theta(robot):
     ax, az = robot.lp, robot.maxh
@@ -82,11 +91,11 @@ class RobotController:
         print("Initialized!")
     
     def set_motor_angles(self, theta1, theta2, theta3, theta4=None):
-        self.s1.angle = clamp(theta1 - 4)
-        self.s2.angle = clamp(theta2)
-        self.s3.angle = clamp(theta3)
+        self.s1.angle = apply_servo_calibration(theta1, 0)
+        self.s2.angle = apply_servo_calibration(theta2, 1)
+        self.s3.angle = apply_servo_calibration(theta3, 2)
         if theta4 is not None:
-            self.s4.angle = clamp(theta4)
+            self.s4.angle = apply_servo_calibration(theta4, 3)
 
     def get_motor_angles(self):
         return [
