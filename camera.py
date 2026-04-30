@@ -1,4 +1,5 @@
 import time
+import math
 import cv2
 from picamera2 import Picamera2, Preview
 import numpy as np
@@ -13,11 +14,12 @@ class Camera:
         self.picam2.configure(config)
 
         self.lower_black = np.array([0, 0, 0])
-        self.upper_black = np.array([180, 255, 50])
-        self.gray_threshold = 60
+        self.upper_black = np.array([180, 255, 60])
+        self.gray_threshold = 80
 
         self.queue = deque(maxlen=16)
-        self.queue.append((100, 75))  
+        self.queue.append((100, 75))
+        self.last_center = (100, 75)
 
         self.picam2.start()    
 
@@ -51,22 +53,24 @@ class Camera:
         # Apply Gaussian blur.
         frame_blurred = cv2.GaussianBlur(image, (3, 3), 0)
         
-        # Convert from BGR to HSV.
-        frame_hsv = cv2.cvtColor(frame_blurred, cv2.COLOR_BGR2HSV)
-        frame_gray = cv2.cvtColor(frame_blurred, cv2.COLOR_BGR2GRAY)
+        # Convert from RGB to HSV / GRAY because Picamera2 returns RGB data.
+        frame_hsv = cv2.cvtColor(frame_blurred, cv2.COLOR_RGB2HSV)
+        frame_gray = cv2.cvtColor(frame_blurred, cv2.COLOR_RGB2GRAY)
 
-        #Filter based on Darkness + HSV
-        mask_hsv = cv2.inRange(frame_hsv, self.lower_black, self.upper_black)
+        # Filter based on dark ball detection in HSV and grayscale.
+        mask_dark = cv2.inRange(frame_hsv, self.lower_black, self.upper_black)
         mask_gray = cv2.threshold(frame_gray, self.gray_threshold, 255, cv2.THRESH_BINARY_INV)[1]
-        mask_combined = cv2.bitwise_or(mask_hsv, mask_gray)
+        mask_combined = cv2.bitwise_or(mask_dark, mask_gray)
 
-        #Process Edges
-        mask_eroded = cv2.erode(mask_combined, None, iterations=1)
-        mask_dilated = cv2.dilate(mask_eroded, None, iterations=1)
+        # Clean up the mask and keep only well-defined blobs.
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask_clean = cv2.morphologyEx(mask_combined, cv2.MORPH_OPEN, kernel, iterations=2)
+        mask_clean = cv2.morphologyEx(mask_clean, cv2.MORPH_CLOSE, kernel, iterations=2)
+        mask_clean = cv2.dilate(mask_clean, kernel, iterations=1)
 
         # --- Find Contours (circles)
         valid_detections = []
-        contours, _ = cv2.findContours(mask_dilated.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(mask_clean.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for contour in contours:
             # Minimum Enclosing Circle
             (x, y), radius = cv2.minEnclosingCircle(contour)
@@ -91,15 +95,44 @@ class Camera:
             # If the contour passes all filters
             valid_detections.append((area, (int(x + w / 2), int(y + h / 2))))
 
-        
         if valid_detections:
-            best_center = max(valid_detections, key=lambda item: item[0])[1]  
-            self.queue.append(best_center) 
-        else:
-            if False and len(self.queue) >= 5 and self.queue[-1] == self.queue[-2] == self.queue[-3] == self.queue[-4] == self.queue[-5]:
-                self.queue.append((100, 75))
+            if self.last_center is not None:
+                def score(candidate):
+                    center = candidate[1]
+                    dist = math.hypot(center[0] - self.last_center[0], center[1] - self.last_center[1])
+                    return candidate[0] - dist * 5
+                best_center = max(valid_detections, key=score)[1]
             else:
-                self.queue.append(self.queue[-1])
+                best_center = max(valid_detections, key=lambda item: item[0])[1]
+            self.last_center = best_center
+            self.queue.append(best_center)
+        else:
+            blurred_gray = cv2.GaussianBlur(frame_gray, (9, 9), 2)
+            circles = cv2.HoughCircles(
+                blurred_gray,
+                cv2.HOUGH_GRADIENT,
+                dp=1.2,
+                minDist=40,
+                param1=100,
+                param2=35,
+                minRadius=10,
+                maxRadius=100,
+            )
+            if circles is not None and self.last_center is not None:
+                circles = np.uint16(np.around(circles[0]))
+                candidates = []
+                for cx, cy, r in circles:
+                    dist = math.hypot(cx - self.last_center[0], cy - self.last_center[1])
+                    if dist < 80:
+                        candidates.append((r, (int(cx), int(cy))))
+                if candidates:
+                    best_circle = max(candidates, key=lambda item: item[0])
+                    best_center = best_circle[1]
+                    self.last_center = best_center
+                    self.queue.append(best_center)
+                    return self.queue[-1]
+
+            self.queue.append(self.last_center)
 
         return self.queue[-1]
         

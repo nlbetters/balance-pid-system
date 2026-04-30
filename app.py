@@ -64,8 +64,10 @@ def update_robot():
         robot.solve_inverse_kinematics_vector(alpha, beta, gamma, h)
         servo_angles = servo_angles_from_kinematics(robot)
         rc.set_motor_angles(*servo_angles)
-    except Exception:
+    except Exception as e:
+        print(f"Inverse kinematics failed: {e}")
         servo_angles = servo_angles_from_kinematics(robot)
+        rc.set_motor_angles(*servo_angles)
 
     response = {
         "robot_type": "4-arm",

@@ -16,8 +16,8 @@ except ImportError:
 
 MIN_SERVO_ANGLE = 0
 MAX_SERVO_ANGLE = 100
-DEFAULT_SERVO_ANGLE = 35
-SERVO_OFFSETS = [-4, 0, 0, 0]
+DEFAULT_SERVO_ANGLE = 65
+SERVO_OFFSETS = [0, 0, 0, 0]
 SERVO_DIRECTIONS = [1, 1, 1, 1]
 SERVO_DIRECTION_PIVOT = DEFAULT_SERVO_ANGLE
 
@@ -53,11 +53,12 @@ def max_height_kinematic_theta(robot):
 def servo_angles_from_kinematics(robot):
     zero_height_theta = max_height_kinematic_theta(robot)
     direction = 1 if robot.invert else -1
+    offset = 25
     return [
-        clamp(direction * (math.degrees(robot.theta1) - zero_height_theta)),
-        clamp(direction * (math.degrees(robot.theta2) - zero_height_theta)),
-        clamp(direction * (math.degrees(robot.theta3) - zero_height_theta)),
-        clamp(direction * (math.degrees(robot.theta4) - zero_height_theta))
+        clamp(direction * (math.degrees(robot.theta1) - zero_height_theta) + offset),
+        clamp(direction * (math.degrees(robot.theta2) - zero_height_theta) + offset),
+        clamp(direction * (math.degrees(robot.theta3) - zero_height_theta) + offset),
+        clamp(direction * (math.degrees(robot.theta4) - zero_height_theta) + offset)
     ]
 
 class RobotController:
@@ -85,8 +86,6 @@ class RobotController:
         print("Initializing ...")
         self.set_motor_angles(DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE)
         self.interpolate_time([DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE], duration=0.25)
-        time.sleep(1)
-        self.Goto_time_spherical(0, 0, 8.26, t=0.25)
         time.sleep(1)
         print("Initialized!")
     

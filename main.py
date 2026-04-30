@@ -14,23 +14,23 @@ latest_frame = np.zeros((200, 150, 3), dtype=np.uint8)
 lock = threading.Lock()
 running = True
 
-kp = 0.015
-ki = 0.0
-kd = 0.0015
+kp = 0.06
+ki = 0.005
+kd = 0.015
 
-alpha = 0.45
-beta = 0.5
+alpha = 0.1
+beta = 2.0
 
-CONTROL_HEIGHT = 8.26
-COMMAND_THETA_GAIN = 1.0
-MAX_COMMAND_THETA = 12.0
-MIN_ACTIVE_THETA = 1.0
-PIXEL_DEADBAND = 4.0
+CONTROL_HEIGHT = 7.5
+COMMAND_THETA_GAIN = 3.0
+MAX_COMMAND_THETA = 18.0
+MIN_ACTIVE_THETA = 0.2
+PIXEL_DEADBAND = 2.0
 COMMAND_PHI_OFFSET_DEG = 0.0
 INVERT_X_RESPONSE = True
 INVERT_Y_RESPONSE = True
 DEBUG_CONTROL = True
-DEBUG_INTERVAL_SECONDS = 0.5
+DEBUG_INTERVAL_SECONDS = 0.2
 
 
 # Initialize objects
@@ -55,7 +55,7 @@ def capture():
             latest_frame = frame 
 
 def process():
-    hz = 50
+    hz = 120
     global latest_frame, x, y
     while True:
         with lock:
@@ -67,7 +67,7 @@ def process():
         x, y = cam.coordinate(frame_copy)  
         x_t, y_t = (100, 75)  # Target position
         update_robot_pos(robot, model, PID, x_t, y_t, x, y)
-        #cam.display_draw(frame_copy, (x,y))
+        cam.display_draw(frame_copy, (x,y))
         #print(f"Coordinates: {x, y}")
         elapsed = time.perf_counter() - loop_start
         sleep_time = (1 / hz) - elapsed
@@ -79,7 +79,7 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
 
     global last_debug_time
     error_pixels = math.hypot(x - x_t, y - y_t)
-    theta, phi = pidcontroller.pid((x_t, y_t), (x, y))
+    theta, phi = pidcontroller.pid((y_t, x_t), (y, x))
     command_x = math.cos(math.radians(phi)) * theta
     command_y = math.sin(math.radians(phi)) * theta
     if INVERT_X_RESPONSE:
@@ -133,4 +133,5 @@ try:
         time.sleep(1)
 except KeyboardInterrupt:
     running = False
+    print("\n")
     print("Exiting...")
