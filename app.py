@@ -62,11 +62,13 @@ def update_robot():
 
         max_theta_for_h = robot.max_theta(h)
         robot.solve_inverse_kinematics_vector(alpha, beta, gamma, h)
-        rc.set_motor_angles(*servo_angles_from_kinematics(robot))
+        servo_angles = servo_angles_from_kinematics(robot)
+        rc.set_motor_angles(*servo_angles)
     except Exception:
-        pass
+        servo_angles = servo_angles_from_kinematics(robot)
 
     response = {
+        "robot_type": "4-arm",
         "alpha": alpha,
         "beta": beta,
         "gamma": gamma,
@@ -75,6 +77,7 @@ def update_robot():
         "theta2": getattr(robot, "theta2", 0.0),
         "theta3": getattr(robot, "theta3", 0.0),
         "theta4": getattr(robot, "theta4", 0.0),
+        "servo_angles": servo_angles,
         "A_points": [robot.A1, robot.A2, robot.A3, robot.A4],
         "B_points": [robot.B1, robot.B2, robot.B3, robot.B4],
         "C_points": [robot.C1, robot.C2, robot.C3, robot.C4],

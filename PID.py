@@ -54,7 +54,7 @@ class PIDcontroller:
         if self.magnitude_convert == 1:
             theta = min(max(0, self.beta*r), self.max_theta)
         else:
-            theta = max(0, 15*math.tanh(self.beta*r))
+            theta = max(0, self.max_theta * math.tanh(self.beta*r))
 
 
         self.prev_err_x = err_x
@@ -64,4 +64,3 @@ class PIDcontroller:
         self.last_time = new_time
 
         return theta, phi #in degrees
-

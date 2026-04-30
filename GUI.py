@@ -9,7 +9,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, robot):
         super().__init__()
         self.robot = robot  # your imported robot instance
-        self.setWindowTitle("3RRS Robot Simulator")
+        self.setWindowTitle("4-Arm Robot Simulator")
         self.resize(1000, 600)
 
         # Create the main widget and layout (horizontal: left for 3D plot, right for input panel)
@@ -34,10 +34,10 @@ class MainWindow(QtWidgets.QMainWindow):
         grid.scale(2, 2, 1)
         self.gl_widget.addItem(grid)
 
-        # Scatter plot items for A (red), B (blue), and C (green)
-        self.scatter_A = gl.GLScatterPlotItem(color=np.array([(1.0, 0.2, 0.2, 1.0)] * 3), size=10)
-        self.scatter_B = gl.GLScatterPlotItem(color=np.array([(0.0, 0.57, 0.8, 1.0)] * 3), size=10)
-        self.scatter_C = gl.GLScatterPlotItem(color=np.array([(0.99, 0.84, 0.57, 1.0)] * 3), size=10)
+        # Scatter plot items for A (red), B (blue), and C (yellow)
+        self.scatter_A = gl.GLScatterPlotItem(color=np.array([(1.0, 0.2, 0.2, 1.0)] * 4), size=10)
+        self.scatter_B = gl.GLScatterPlotItem(color=np.array([(0.0, 0.57, 0.8, 1.0)] * 4), size=10)
+        self.scatter_C = gl.GLScatterPlotItem(color=np.array([(0.99, 0.84, 0.57, 1.0)] * 4), size=10)
         self.gl_widget.addItem(self.scatter_A)
         self.gl_widget.addItem(self.scatter_B)
         self.gl_widget.addItem(self.scatter_C)
@@ -48,13 +48,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gl_widget.addItem(self.line_A)
         self.gl_widget.addItem(self.line_B)
 
-        # Three separate line items for C connections (green)
+        # Four separate line items for the arm connections
         self.line_C1 = gl.GLLinePlotItem(color=(0.99, 0.84, 0.57, 1.0), width=5, antialias=True)
         self.line_C2 = gl.GLLinePlotItem(color=(0.99, 0.84, 0.57, 1.0), width=5, antialias=True)
         self.line_C3 = gl.GLLinePlotItem(color=(0.99, 0.84, 0.57, 1.0), width=5, antialias=True)
+        self.line_C4 = gl.GLLinePlotItem(color=(0.99, 0.84, 0.57, 1.0), width=5, antialias=True)
         self.gl_widget.addItem(self.line_C1)
         self.gl_widget.addItem(self.line_C2)
         self.gl_widget.addItem(self.line_C3)
+        self.gl_widget.addItem(self.line_C4)
 
         # --------------------------
         # Right Panel: Fake Input Portal
@@ -273,7 +275,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.label_h.setAlignment(QtCore.Qt.AlignCenter)
         grid3.addWidget(self.label_h, 0, 7)
 
-        # Row 1: θ₁, θ₂, θ₃ in the next row
+        # Row 1: θ₁, θ₂, θ₃, θ₄ in the next row
         grid3.addWidget(QtWidgets.QLabel("θ₁:"), 1, 0)
         self.label_theta1 = QtWidgets.QLabel("0.00")
         self.label_theta1.setFixedWidth(label_width)
@@ -291,6 +293,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.label_theta3.setFixedWidth(label_width)
         self.label_theta3.setAlignment(QtCore.Qt.AlignCenter)
         grid3.addWidget(self.label_theta3, 1, 5)
+
+        grid3.addWidget(QtWidgets.QLabel("θ₄:"), 1, 6)
+        self.label_theta4 = QtWidgets.QLabel("0.00")
+        self.label_theta4.setFixedWidth(label_width)
+        self.label_theta4.setAlignment(QtCore.Qt.AlignCenter)
+        grid3.addWidget(self.label_theta4, 1, 7)
 
         # Add grid3 to the existing input panel's layout
         return_group.setLayout(grid3)
@@ -339,7 +347,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def reset_input_values(self):
         self.slider_theta.setValue(0)
         self.slider_phi.setValue(0)
-        h_ = int((self.robot.maxh - self.robot.minh)*100//2)
+        h_ = int(((self.robot.maxh + self.robot.minh) / 2) * 100)
         self.slider_h.setValue(h_)
 
     def input_changed(self):
@@ -412,43 +420,43 @@ class MainWindow(QtWidgets.QMainWindow):
         self.compute_vector()
         self.robot.solve_inverse_kinematics_vector(self.alpha, self.beta, self.gamma, self.h)
 
-        self.label_theta1.setText(f"{self.robot.theta1:.2f}")
-        self.label_theta2.setText(f"{self.robot.theta2:.2f}")
-        self.label_theta3.setText(f"{self.robot.theta3:.2f}")
+        self.label_theta1.setText(f"{math.degrees(self.robot.theta1):.2f}")
+        self.label_theta2.setText(f"{math.degrees(self.robot.theta2):.2f}")
+        self.label_theta3.setText(f"{math.degrees(self.robot.theta3):.2f}")
+        self.label_theta4.setText(f"{math.degrees(self.robot.theta4):.2f}")
 
 
     def update_plot(self):
         """Update the 3D plot elements based on the current robot coordinates."""
         # Read positions from the robot (each attribute is assumed to be a 3-element array)
-        A_points = np.array([self.robot.A1, self.robot.A2, self.robot.A3])
-        B_points = np.array([self.robot.B1, self.robot.B2, self.robot.B3])
-        C_points = np.array([self.robot.C1, self.robot.C2, self.robot.C3])
+        A_points = np.array([self.robot.A1, self.robot.A2, self.robot.A3, self.robot.A4])
+        B_points = np.array([self.robot.B1, self.robot.B2, self.robot.B3, self.robot.B4])
+        C_points = np.array([self.robot.C1, self.robot.C2, self.robot.C3, self.robot.C4])
 
         self.scatter_A.setData(pos=A_points)
         self.scatter_B.setData(pos=B_points)
         self.scatter_C.setData(pos=C_points)
 
-        # A loop: A1 → A2, A2 → A3, A3 → A1 (red)
+        # A loop: A1 to A2 to A3 to A4 to A1 (red)
         self.line_A.setData(pos=[
             self.robot.A1, self.robot.A2,
             self.robot.A2, self.robot.A3,
-            self.robot.A3, self.robot.A1
+            self.robot.A3, self.robot.A4,
+            self.robot.A4, self.robot.A1
         ])
 
-        # B loop: B1 → B2, B2 → B3, B3 → B1 (blue)
+        # B loop: B1 to B2 to B3 to B4 to B1 (blue)
         self.line_B.setData(pos=[
             self.robot.B1, self.robot.B2,
             self.robot.B2, self.robot.B3,
-            self.robot.B3, self.robot.B1
+            self.robot.B3, self.robot.B4,
+            self.robot.B4, self.robot.B1
         ])
 
-        # C connections (green): three separate lines:
-        # Line for connection between A1, C1, and B1
         self.line_C1.setData(pos=[self.robot.A1, self.robot.C1, self.robot.C1, self.robot.B1])
-        # Line for connection between A2, C2, and B2
         self.line_C2.setData(pos=[self.robot.A2, self.robot.C2, self.robot.C2, self.robot.B2])
-        # Line for connection between A3, C3, and B3
         self.line_C3.setData(pos=[self.robot.A3, self.robot.C3, self.robot.C3, self.robot.B3])
+        self.line_C4.setData(pos=[self.robot.A4, self.robot.C4, self.robot.C4, self.robot.B4])
 
 
 # ------------------------------------------------------------------------------

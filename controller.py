@@ -16,7 +16,7 @@ except ImportError:
 
 MIN_SERVO_ANGLE = 0
 MAX_SERVO_ANGLE = 100
-DEFAULT_SERVO_ANGLE = 0
+DEFAULT_SERVO_ANGLE = 35
 
 def clamp(value, lower=MIN_SERVO_ANGLE, upper=MAX_SERVO_ANGLE):
     return max(lower, min(value, upper))
@@ -174,4 +174,3 @@ if __name__ == "__main__":
     model = RobotKinematics()
     rc = RobotController(model)
     time.sleep(0.5)
-

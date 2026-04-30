@@ -33,14 +33,24 @@ kd = 0.006025 #0.00595    0.00595
 alpha = 0.65
 beta = 0.3
 
+CONTROL_HEIGHT = 8.26
+COMMAND_THETA_GAIN = 1.0
+COMMAND_PHI_OFFSET_DEG = 0.0
+INVERT_X_RESPONSE = False
+INVERT_Y_RESPONSE = False
+DEBUG_CONTROL = True
+DEBUG_INTERVAL_SECONDS = 0.5
+
 
 # Initialize objects
 cam = Camera()
 model = RobotKinematics()
 robot = RobotController(model, model.lp, model.l1, model.l2, model.lb)
+model.max_theta(CONTROL_HEIGHT)
 
 
 PID = PIDcontroller(kp, ki, kd, alpha, beta, max_theta=model.maxtheta, conversion="tanh")
+last_debug_time = 0.0
 
 #Initialize Ball Position
 x, y = 100, 75
@@ -76,10 +86,30 @@ def process():
 
 def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, x, y): #x_t, y_t: target position, x, y: current position, t: duration 
 
+    global last_debug_time
     theta, phi = pidcontroller.pid((x_t, y_t), (x, y))
-    #print(theta, phi)
-    #robotcontroller.Goto_time_spherical(theta, phi, 8.26, 0.02)
-    robotcontroller.Goto_N_time_spherical(theta, phi, 8.26)
+    command_x = math.cos(math.radians(phi)) * theta
+    command_y = math.sin(math.radians(phi)) * theta
+    if INVERT_X_RESPONSE:
+        command_x *= -1
+    if INVERT_Y_RESPONSE:
+        command_y *= -1
+
+    theta = min(
+        math.hypot(command_x, command_y) * COMMAND_THETA_GAIN,
+        robotkinematics.maxtheta
+    )
+    phi = (math.degrees(math.atan2(command_y, command_x)) + COMMAND_PHI_OFFSET_DEG) % 360
+
+    robotcontroller.Goto_N_time_spherical(theta, phi, CONTROL_HEIGHT)
+
+    now = time.perf_counter()
+    if DEBUG_CONTROL and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
+        last_debug_time = now
+        print(
+            f"ball=({x:.1f},{y:.1f}) target=({x_t:.1f},{y_t:.1f}) "
+            f"theta={theta:.2f} phi={phi:.1f} servos={[round(a, 1) for a in robotcontroller.get_motor_angles()]}"
+        )
 
 
 
