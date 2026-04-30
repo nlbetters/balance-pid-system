@@ -16,28 +16,19 @@ running = True
 
 kp = 0.015
 ki = 0.0
-kd = 0.00865
+kd = 0.0015
 
-
-
-#kp = 0.0134
-#kd = 0.0024
-
-
-kp = 0.0063 #0.0063   0.0046
-ki = 0.00005 #0.00005
-kd = 0.006025 #0.00595    0.00595
-
-
-
-alpha = 0.65
-beta = 0.3
+alpha = 0.45
+beta = 0.5
 
 CONTROL_HEIGHT = 8.26
 COMMAND_THETA_GAIN = 1.0
+MAX_COMMAND_THETA = 12.0
+MIN_ACTIVE_THETA = 1.0
+PIXEL_DEADBAND = 4.0
 COMMAND_PHI_OFFSET_DEG = 0.0
-INVERT_X_RESPONSE = False
-INVERT_Y_RESPONSE = False
+INVERT_X_RESPONSE = True
+INVERT_Y_RESPONSE = True
 DEBUG_CONTROL = True
 DEBUG_INTERVAL_SECONDS = 0.5
 
@@ -87,6 +78,7 @@ def process():
 def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, x, y): #x_t, y_t: target position, x, y: current position, t: duration 
 
     global last_debug_time
+    error_pixels = math.hypot(x - x_t, y - y_t)
     theta, phi = pidcontroller.pid((x_t, y_t), (x, y))
     command_x = math.cos(math.radians(phi)) * theta
     command_y = math.sin(math.radians(phi)) * theta
@@ -95,10 +87,12 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
     if INVERT_Y_RESPONSE:
         command_y *= -1
 
-    theta = min(
-        math.hypot(command_x, command_y) * COMMAND_THETA_GAIN,
-        robotkinematics.maxtheta
-    )
+    theta = math.hypot(command_x, command_y) * COMMAND_THETA_GAIN
+    if error_pixels <= PIXEL_DEADBAND:
+        theta = 0.0
+    elif theta < MIN_ACTIVE_THETA:
+        theta = MIN_ACTIVE_THETA
+    theta = min(theta, robotkinematics.maxtheta, MAX_COMMAND_THETA)
     phi = (math.degrees(math.atan2(command_y, command_x)) + COMMAND_PHI_OFFSET_DEG) % 360
 
     robotcontroller.Goto_N_time_spherical(theta, phi, CONTROL_HEIGHT)
@@ -108,7 +102,8 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
         last_debug_time = now
         print(
             f"ball=({x:.1f},{y:.1f}) target=({x_t:.1f},{y_t:.1f}) "
-            f"theta={theta:.2f} phi={phi:.1f} servos={[round(a, 1) for a in robotcontroller.get_motor_angles()]}"
+            f"err={error_pixels:.1f} theta={theta:.2f} phi={phi:.1f} "
+            f"servos={[round(a, 1) for a in robotcontroller.get_motor_angles()]}"
         )
 
 
