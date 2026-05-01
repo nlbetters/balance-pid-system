@@ -31,7 +31,7 @@ INVERT_X_RESPONSE = True
 INVERT_Y_RESPONSE = True
 DEBUG_CONTROL = True
 DEBUG_INTERVAL_SECONDS = 0.2
-DEBUG_VISION = False
+DEBUG_VISION = True
 
 
 # Initialize objects
@@ -65,7 +65,7 @@ def process():
             frame_copy = latest_frame.copy()
         
         loop_start = time.perf_counter()
-        center, offset, found, confidence = cam.coordinate_with_offset(frame_copy)
+        center, offset, found, confidence, fps, last_valid = cam.coordinate_with_offset(frame_copy)
         x_t, y_t = cam.frame_center  # Target position
 
         if found or cam.last_valid_position is not None:

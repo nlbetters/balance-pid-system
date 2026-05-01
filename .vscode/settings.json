@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^python3 -m unittest tests\\.test_camera_tracking$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
