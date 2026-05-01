@@ -16,7 +16,7 @@ except ImportError:
 
 MIN_SERVO_ANGLE = 0
 MAX_SERVO_ANGLE = 100
-DEFAULT_SERVO_ANGLE = 65
+DEFAULT_SERVO_ANGLE = 45
 SERVO_OFFSETS = [0, 0, 0, 0]
 SERVO_DIRECTIONS = [1, 1, 1, 1]
 SERVO_DIRECTION_PIVOT = DEFAULT_SERVO_ANGLE
@@ -30,20 +30,20 @@ def apply_servo_calibration(angle, servo_index):
     )
     return clamp(directed_angle + SERVO_OFFSETS[servo_index])
 
-def max_height_kinematic_theta(robot):
-    ax, az = robot.lp, robot.maxh
+def reference_kinematic_theta(robot, h):
+    ax, az = robot.lp, h
     bx, bz = robot.lb, 0.0
     dx = bx - ax
     dz = bz - az
     d = math.hypot(dx, dz)
     a = (robot.l1**2 - robot.l2**2 + d**2) / (2 * d)
-    h = math.sqrt(max(0.0, robot.l1**2 - a**2))
+    leg_height = math.sqrt(max(0.0, robot.l1**2 - a**2))
     p2x = ax + a * dx / d
     p2z = az + a * dz / d
     perp_x = -dz / d
     perp_z = dx / d
-    c1 = [p2x + h * perp_x, p2z + h * perp_z]
-    c2 = [p2x - h * perp_x, p2z - h * perp_z]
+    c1 = [p2x + leg_height * perp_x, p2z + leg_height * perp_z]
+    c2 = [p2x - leg_height * perp_x, p2z - leg_height * perp_z]
     if robot.invert:
         cx, cz = min((c1, c2), key=lambda c: c[0])
     else:
@@ -51,15 +51,15 @@ def max_height_kinematic_theta(robot):
     return math.degrees(math.pi / 2 - math.atan2(cx - robot.lb, cz))
 
 def servo_angles_from_kinematics(robot):
-    zero_height_theta = max_height_kinematic_theta(robot)
+    neutral_theta = reference_kinematic_theta(robot, robot.h)
     direction = 1 if robot.invert else -1
-    offset = 25
-    return [
-        clamp(direction * (math.degrees(robot.theta1) - zero_height_theta) + offset),
-        clamp(direction * (math.degrees(robot.theta2) - zero_height_theta) + offset),
-        clamp(direction * (math.degrees(robot.theta3) - zero_height_theta) + offset),
-        clamp(direction * (math.degrees(robot.theta4) - zero_height_theta) + offset)
+    raw_angles = [
+        DEFAULT_SERVO_ANGLE + direction * (math.degrees(robot.theta1) - neutral_theta),
+        DEFAULT_SERVO_ANGLE + direction * (math.degrees(robot.theta2) - neutral_theta),
+        DEFAULT_SERVO_ANGLE + direction * (math.degrees(robot.theta3) - neutral_theta),
+        DEFAULT_SERVO_ANGLE + direction * (math.degrees(robot.theta4) - neutral_theta)
     ]
+    return [clamp(angle) for angle in raw_angles]
 
 class RobotController:
     SERVO_CHANNELS = [0, 4, 8, 12]
@@ -84,8 +84,9 @@ class RobotController:
 
     def initialize(self):
         print("Initializing ...")
-        self.set_motor_angles(DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE)
-        self.interpolate_time([DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE, DEFAULT_SERVO_ANGLE], duration=0.25)
+        neutral_angles = [DEFAULT_SERVO_ANGLE] * 4
+        self.set_motor_angles(*neutral_angles)
+        self.interpolate_time(neutral_angles, duration=0.25)
         time.sleep(1)
         print("Initialized!")
     

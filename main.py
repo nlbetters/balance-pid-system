@@ -21,17 +21,23 @@ kd = 0.015
 alpha = 0.1
 beta = 2.0
 
-CONTROL_HEIGHT = 7.5
-COMMAND_THETA_GAIN = 3.0
-MAX_COMMAND_THETA = 18.0
+
+# Main control tuning. CONTROL_HEIGHT is the platform operating height used by the
+# inverse kinematics. The controller now maps this neutral height to servo angle 45.
+CONTROL_HEIGHT = 9.0
+COMMAND_THETA_GAIN = 2.0
+MAX_COMMAND_THETA = 12.0
 MIN_ACTIVE_THETA = 0.2
-PIXEL_DEADBAND = 2.0
+PIXEL_DEADBAND = 3.0
 COMMAND_PHI_OFFSET_DEG = 0.0
 INVERT_X_RESPONSE = True
 INVERT_Y_RESPONSE = True
+
+# Loop/debug tuning. Vision debug is useful for setup, but it slows the loop down.
+CAMERA_HZ = 120
 DEBUG_CONTROL = True
 DEBUG_INTERVAL_SECONDS = 0.2
-DEBUG_VISION = True
+DEBUG_VISION = False
 
 
 # Initialize objects
@@ -43,6 +49,7 @@ model.max_theta(CONTROL_HEIGHT)
 
 PID = PIDcontroller(kp, ki, kd, alpha, beta, max_theta=model.maxtheta, conversion="tanh")
 last_debug_time = 0.0
+pid_was_reset_for_lost_ball = False
 
 # Initialize ball position at the camera target.
 x, y = cam.frame_center
@@ -50,15 +57,15 @@ x, y = cam.frame_center
 def capture():
 
     global latest_frame
-    while True:
+    while running:
         frame = cam.take_picture()
         with lock:
             latest_frame = frame 
 
 def process():
-    hz = 120
-    global latest_frame, x, y
-    while True:
+    hz = CAMERA_HZ
+    global latest_frame, x, y, pid_was_reset_for_lost_ball
+    while running:
         with lock:
             if latest_frame is None:
                 continue 
@@ -68,11 +75,16 @@ def process():
         center, offset, found, confidence, fps, last_valid = cam.coordinate_with_offset(frame_copy)
         x_t, y_t = cam.frame_center  # Target position
 
-        if found or cam.last_valid_position is not None:
+        if found:
             x, y = center
+            pid_was_reset_for_lost_ball = False
         else:
-            # No trustworthy ball yet: command the neutral target position.
+            # If the ball is lost, do not chase a stale camera position.
+            # Go neutral and clear old PID memory until the tracker finds the ball again.
             x, y = x_t, y_t
+            if not pid_was_reset_for_lost_ball:
+                PID.reset()
+                pid_was_reset_for_lost_ball = True
 
         update_robot_pos(robot, model, PID, x_t, y_t, x, y)
         if DEBUG_VISION:
@@ -88,6 +100,8 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
 
     global last_debug_time
     error_pixels = math.hypot(x - x_t, y - y_t)
+    # Camera axes are swapped here on purpose because of the mounted camera direction.
+    # Recheck this if the platform tilts on the wrong axis.
     theta, phi = pidcontroller.pid((y_t, x_t), (y, x))
     command_x = math.cos(math.radians(phi)) * theta
     command_y = math.sin(math.radians(phi)) * theta
