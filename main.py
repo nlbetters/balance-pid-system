@@ -10,7 +10,7 @@ from PID import PIDcontroller
 
 
 # Shared variables
-latest_frame = np.zeros((200, 150, 3), dtype=np.uint8)
+latest_frame = np.zeros((150, 200, 3), dtype=np.uint8)
 lock = threading.Lock()
 running = True
 
@@ -31,10 +31,11 @@ INVERT_X_RESPONSE = True
 INVERT_Y_RESPONSE = True
 DEBUG_CONTROL = True
 DEBUG_INTERVAL_SECONDS = 0.2
+DEBUG_VISION = False
 
 
 # Initialize objects
-cam = Camera()
+cam = Camera(debug=DEBUG_VISION)
 model = RobotKinematics()
 robot = RobotController(model, model.lp, model.l1, model.l2, model.lb)
 model.max_theta(CONTROL_HEIGHT)
@@ -43,8 +44,8 @@ model.max_theta(CONTROL_HEIGHT)
 PID = PIDcontroller(kp, ki, kd, alpha, beta, max_theta=model.maxtheta, conversion="tanh")
 last_debug_time = 0.0
 
-#Initialize Ball Position
-x, y = 100, 75
+# Initialize ball position at the camera target.
+x, y = cam.frame_center
 
 def capture():
 
@@ -64,10 +65,18 @@ def process():
             frame_copy = latest_frame.copy()
         
         loop_start = time.perf_counter()
-        x, y = cam.coordinate(frame_copy)  
-        x_t, y_t = (100, 75)  # Target position
+        center, offset, found, confidence = cam.coordinate_with_offset(frame_copy)
+        x_t, y_t = cam.frame_center  # Target position
+
+        if found or cam.last_valid_position is not None:
+            x, y = center
+        else:
+            # No trustworthy ball yet: command the neutral target position.
+            x, y = x_t, y_t
+
         update_robot_pos(robot, model, PID, x_t, y_t, x, y)
-        cam.display_draw(frame_copy, (x,y))
+        if DEBUG_VISION:
+            cam.display_debug()
         #print(f"Coordinates: {x, y}")
         elapsed = time.perf_counter() - loop_start
         sleep_time = (1 / hz) - elapsed
@@ -112,7 +121,7 @@ def pid_loop():
     hz = 30  # PID frequency
     while running:
         loop_start = time.perf_counter()
-        x_t, y_t = (100, 75)  # Target position
+        x_t, y_t = cam.frame_center  # Target position
         update_robot_pos(robot, model, PID, x_t, y_t, x, y)
         elapsed = time.perf_counter() - loop_start
         sleep_time = (1 / hz) - elapsed
