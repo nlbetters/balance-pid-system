@@ -11,37 +11,55 @@ FRAME_SIZE = (200, 150)
 CAMERA_FORMAT = "RGB888"
 FRAME_DURATION_US = 8333  # about 120 FPS if exposure/light allow it
 
-# Ball color profiles: HSV ranges for different ball types
+# Ball color profiles. Each profile has one or more HSV ranges.
+# These are intentionally broad because the camera exposure changes a lot.
 BALL_COLOR_PROFILES = {
-    "white": (np.array([0, 0, 100]), np.array([180, 80, 255])),    # white/light ball - lowered V min
-    "gold": (np.array([20, 50, 100]), np.array([40, 255, 255])),    # gold/yellow ball
-    "green": (np.array([40, 50, 50]), np.array([80, 255, 255])),    # green ball (optional for testing)
+    "white": [
+        (np.array([0, 0, 115]), np.array([180, 85, 255])),
+    ],
+    "gold": [
+        (np.array([10, 35, 70]), np.array([42, 255, 255])),
+    ],
+    "green": [
+        (np.array([35, 35, 45]), np.array([90, 255, 255])),
+    ],
 }
-WHITE_LAB_RANGE = (np.array([200, 110, 110]), np.array([255, 155, 155]))  # additional for white
+WHITE_LAB_RANGE = (np.array([155, 105, 105]), np.array([255, 165, 165]))
 
-# Platform ROI: circular mask to focus on platform area, radius from center
-PLATFORM_MASK_RADIUS = 70  # pixels from frame center
+# Platform ROI. Use almost the full frame so the ball is not accidentally masked out.
+# A smaller ROI can be used later once the camera is mounted permanently.
+PLATFORM_MASK_RADIUS = 95
 
 # Ball size limits in the 200 x 150 tracking image.
-MIN_CONTOUR_AREA = 30
-MAX_CONTOUR_AREA = 6000
-MIN_RADIUS = 4
-MAX_RADIUS = 55
-EDGE_MARGIN = 3
+MIN_CONTOUR_AREA = 25
+MAX_CONTOUR_AREA = 7000
+MIN_RADIUS = 5
+MAX_RADIUS = 45
+EDGE_MARGIN = 2
 
 # Shape/mask quality checks.
-MIN_CIRCULARITY = 0.58
-MIN_FILL_RATIO = 0.48
-MAX_FILL_RATIO = 1.22
-MIN_ASPECT_RATIO = 0.65
-MAX_ASPECT_RATIO = 1.35
-MIN_CONFIDENCE = 0.55
-MIN_COLOR_CONFIDENCE = 0.25
-MIN_BRIGHTNESS_SCORE = 0.2  # reject dark contours like hand holes - lowered
-MIN_SATURATION_SCORE = 0.0  # allow low saturation for white balls
+MIN_CIRCULARITY = 0.45
+MIN_FILL_RATIO = 0.35
+MAX_FILL_RATIO = 1.35
+MIN_ASPECT_RATIO = 0.55
+MAX_ASPECT_RATIO = 1.55
+MIN_CONFIDENCE = 0.50
+MIN_COLOR_CONFIDENCE = 0.18
+MIN_BRIGHTNESS_SCORE = 0.22
+MIN_SATURATION_SCORE = 0.0
+
+# Hough circle fallback. This helps when a white/gold ball blends into the background
+# and color thresholding only creates weak or broken contours.
+USE_HOUGH_FALLBACK = True
+HOUGH_DP = 1.2
+HOUGH_MIN_DIST = 28
+HOUGH_PARAM1 = 80
+HOUGH_PARAM2 = 16
+HOUGH_MIN_RADIUS = 5
+HOUGH_MAX_RADIUS = 45
 
 # Tracking checks and PID-friendly smoothing.
-MAX_FRAME_JUMP = 55
+MAX_FRAME_JUMP = 70
 SMOOTHING_ALPHA = 0.35
 MAX_MISSED_FRAMES = 4
 
@@ -49,8 +67,8 @@ MAX_MISSED_FRAMES = 4
 USE_GAUSSIAN_BLUR = True
 MORPH_KERNEL_SIZE = 3
 MORPH_OPEN_ITERATIONS = 1
-MORPH_CLOSE_ITERATIONS = 1
-USE_CLAHE = True
+MORPH_CLOSE_ITERATIONS = 2
+USE_CLAHE = False
 
 
 @dataclass
@@ -60,6 +78,7 @@ class Detection:
     area: float
     confidence: float
     color_confidence: float
+    color_name: str
     circularity: float
     fill_ratio: float
     edge_distance: float
@@ -174,15 +193,22 @@ class Camera:
 
     def _build_ball_mask(self, image):
         hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
-        mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
-        for color_name, (lower, upper) in BALL_COLOR_PROFILES.items():
-            mask = cv2.bitwise_or(mask, cv2.inRange(hsv, lower, upper))
+        masks = {}
+        combined = np.zeros(hsv.shape[:2], dtype=np.uint8)
 
-        # Additional LAB mask for white balls
+        for color_name, ranges in BALL_COLOR_PROFILES.items():
+            profile_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+            for lower, upper in ranges:
+                profile_mask = cv2.bitwise_or(profile_mask, cv2.inRange(hsv, lower, upper))
+            masks[color_name] = profile_mask
+            combined = cv2.bitwise_or(combined, profile_mask)
+
         lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
         lab_mask = cv2.inRange(lab, WHITE_LAB_RANGE[0], WHITE_LAB_RANGE[1])
-        mask = cv2.bitwise_or(mask, lab_mask)
-        return mask
+        masks["white"] = cv2.bitwise_or(masks["white"], lab_mask)
+        combined = cv2.bitwise_or(combined, lab_mask)
+
+        return combined, masks
 
     def coordinate_with_offset(self, image):
         center = self.coordinate(image)
@@ -201,9 +227,10 @@ class Camera:
         if USE_CLAHE:
             source = self._apply_clahe(source)
 
-        mask = self._build_ball_mask(source)
-        # Apply platform ROI
+        mask, profile_masks = self._build_ball_mask(source)
         mask = cv2.bitwise_and(mask, mask, mask=self._platform_mask)
+        for name in profile_masks:
+            profile_masks[name] = cv2.bitwise_and(profile_masks[name], profile_masks[name], mask=self._platform_mask)
 
         if MORPH_OPEN_ITERATIONS:
             mask = cv2.morphologyEx(
@@ -226,7 +253,7 @@ class Camera:
             )
 
         for contour in contours:
-            detection = self._score_contour(contour, image.shape, mask, source)
+            detection = self._score_contour(contour, image.shape, mask, profile_masks, source)
             if self.debug:
                 debug_detections.append(detection)
                 self._print_detection_debug(detection)
@@ -235,11 +262,21 @@ class Camera:
             if best is None or detection.confidence > best.confidence:
                 best = detection
 
+        if USE_HOUGH_FALLBACK:
+            for detection in self._hough_detections(source, image.shape, profile_masks):
+                if self.debug:
+                    debug_detections.append(detection)
+                    self._print_detection_debug(detection)
+                if detection.rejection_reason != "accepted":
+                    continue
+                if best is None or detection.confidence > best.confidence:
+                    best = detection
+
         if best is not None and best.confidence >= MIN_CONFIDENCE:
             return best, mask, debug_detections
         return None, mask, debug_detections
 
-    def _score_contour(self, contour, image_shape, mask, image):
+    def _score_contour(self, contour, image_shape, mask, profile_masks, image):
         area = cv2.contourArea(contour)
         center = (0, 0)
         radius = 0.0
@@ -248,6 +285,7 @@ class Camera:
         aspect_ratio = 0.0
         edge_distance = 0.0
         color_confidence = 0.0
+        color_name = "none"
         brightness_score = 0.0
         saturation_score = 0.0
         movement_score = 1.0
@@ -257,7 +295,7 @@ class Camera:
             (x_float, y_float), radius = cv2.minEnclosingCircle(contour)
             center = (int(round(x_float)), int(round(y_float)))
             edge_distance = self._edge_distance(center, radius, image_shape)
-            color_confidence = self._color_confidence(contour, mask)
+            color_confidence, color_name = self._best_color_confidence(contour, profile_masks)
             brightness_score, saturation_score = self._brightness_saturation_scores(contour, image)
 
             perimeter = cv2.arcLength(contour, True)
@@ -294,6 +332,7 @@ class Camera:
                 area=area,
                 confidence=confidence,
                 color_confidence=color_confidence,
+                color_name=color_name,
                 circularity=circularity,
                 fill_ratio=fill_ratio,
                 edge_distance=edge_distance,
@@ -331,6 +370,93 @@ class Camera:
 
         return result("accepted")
 
+    def _hough_detections(self, image, image_shape, profile_masks):
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        circles = cv2.HoughCircles(
+            gray,
+            cv2.HOUGH_GRADIENT,
+            dp=HOUGH_DP,
+            minDist=HOUGH_MIN_DIST,
+            param1=HOUGH_PARAM1,
+            param2=HOUGH_PARAM2,
+            minRadius=HOUGH_MIN_RADIUS,
+            maxRadius=HOUGH_MAX_RADIUS,
+        )
+        if circles is None:
+            return []
+
+        detections = []
+        for x_float, y_float, radius_float in np.round(circles[0, :]).astype("int"):
+            center = (int(x_float), int(y_float))
+            radius = float(radius_float)
+            contour = cv2.ellipse2Poly(center, (int(radius), int(radius)), 0, 0, 360, 8)
+            contour = contour.reshape((-1, 1, 2))
+            detections.append(self._score_circle_candidate(center, radius, contour, image_shape, profile_masks, image))
+        return detections
+
+    def _score_circle_candidate(self, center, radius, contour, image_shape, profile_masks, image):
+        area = float(np.pi * radius * radius)
+        edge_distance = self._edge_distance(center, radius, image_shape)
+        color_confidence, color_name = self._circle_color_confidence(center, radius, profile_masks)
+        brightness_score, saturation_score = self._circle_brightness_saturation_scores(center, radius, image)
+        movement_score = 1.0
+        if self.last_valid_position is not None:
+            jump = np.hypot(center[0] - self.last_valid_position[0], center[1] - self.last_valid_position[1])
+            movement_score = np.clip(1.0 - jump / MAX_FRAME_JUMP, 0.0, 1.0)
+
+        circularity = 1.0
+        fill_ratio = 0.95
+        aspect_ratio = 1.0
+        confidence = self._confidence_score(
+            area=area,
+            radius=radius,
+            circularity=circularity,
+            fill_ratio=fill_ratio,
+            aspect_ratio=aspect_ratio,
+            center=center,
+            color_confidence=color_confidence,
+            brightness_score=brightness_score,
+            saturation_score=saturation_score,
+            movement_score=movement_score,
+        )
+
+        def result(reason):
+            return Detection(
+                center=center,
+                radius=radius,
+                area=area,
+                confidence=confidence,
+                color_confidence=color_confidence,
+                color_name=color_name,
+                circularity=circularity,
+                fill_ratio=fill_ratio,
+                edge_distance=edge_distance,
+                brightness_score=brightness_score,
+                saturation_score=saturation_score,
+                movement_score=movement_score,
+                rejection_reason=reason,
+                contour=contour,
+            )
+
+        if radius < MIN_RADIUS or radius > MAX_RADIUS:
+            return result("hough_radius")
+        if edge_distance < EDGE_MARGIN:
+            return result("hough_edge")
+        if self._platform_mask[center[1], center[0]] == 0:
+            return result("hough_roi")
+        if self.last_valid_position is not None:
+            jump = np.hypot(center[0] - self.last_valid_position[0], center[1] - self.last_valid_position[1])
+            if jump > MAX_FRAME_JUMP:
+                return result("hough_jump")
+        if color_confidence < MIN_COLOR_CONFIDENCE and brightness_score < 0.45:
+            return result("hough_color")
+        if brightness_score < MIN_BRIGHTNESS_SCORE:
+            return result("hough_dark")
+        if confidence < MIN_CONFIDENCE:
+            return result("hough_confidence")
+        return result("accepted")
+
     def _confidence_score(self, area, radius, circularity, fill_ratio, aspect_ratio, center, color_confidence, brightness_score, saturation_score, movement_score):
         circularity_score = np.clip((circularity - MIN_CIRCULARITY) / 0.35, 0.0, 1.0)
         fill_score = np.clip(1.0 - abs(fill_ratio - 0.78) / 0.35, 0.0, 1.0)
@@ -355,14 +481,50 @@ class Camera:
         return float(min(x - radius, y - radius, width - x - radius, height - y - radius))
 
     @staticmethod
-    def _color_confidence(contour, mask):
-        contour_mask = np.zeros(mask.shape, dtype=np.uint8)
+    def _best_color_confidence(contour, profile_masks):
+        contour_mask = np.zeros(next(iter(profile_masks.values())).shape, dtype=np.uint8)
         cv2.drawContours(contour_mask, [contour], -1, 255, thickness=-1)
         contour_pixels = cv2.countNonZero(contour_mask)
         if contour_pixels == 0:
-            return 0.0
-        matched_pixels = cv2.countNonZero(cv2.bitwise_and(mask, mask, mask=contour_mask))
-        return float(matched_pixels / contour_pixels)
+            return 0.0, "none"
+
+        best_score = 0.0
+        best_name = "none"
+        for name, mask in profile_masks.items():
+            matched_pixels = cv2.countNonZero(cv2.bitwise_and(mask, mask, mask=contour_mask))
+            score = float(matched_pixels / contour_pixels)
+            if score > best_score:
+                best_score = score
+                best_name = name
+        return best_score, best_name
+
+    @staticmethod
+    def _circle_color_confidence(center, radius, profile_masks):
+        circle_mask = np.zeros(next(iter(profile_masks.values())).shape, dtype=np.uint8)
+        cv2.circle(circle_mask, center, int(radius * 0.80), 255, -1)
+        circle_pixels = cv2.countNonZero(circle_mask)
+        if circle_pixels == 0:
+            return 0.0, "none"
+
+        best_score = 0.0
+        best_name = "none"
+        for name, mask in profile_masks.items():
+            matched_pixels = cv2.countNonZero(cv2.bitwise_and(mask, mask, mask=circle_mask))
+            score = float(matched_pixels / circle_pixels)
+            if score > best_score:
+                best_score = score
+                best_name = name
+        return best_score, best_name
+
+    @staticmethod
+    def _circle_brightness_saturation_scores(center, radius, image):
+        circle_mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        cv2.circle(circle_mask, center, int(radius * 0.80), 255, -1)
+        hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+        _, s, v = cv2.split(hsv)
+        mean_v = cv2.mean(v, mask=circle_mask)[0] / 255.0
+        mean_s = cv2.mean(s, mask=circle_mask)[0] / 255.0
+        return mean_v, mean_s
 
     @staticmethod
     def _brightness_saturation_scores(contour, image):
@@ -384,7 +546,7 @@ class Camera:
             f"circularity={detection.circularity:.2f} "
             f"fill={detection.fill_ratio:.2f} "
             f"edge={detection.edge_distance:.1f} "
-            f"color={detection.color_confidence:.2f} "
+            f"color={detection.color_confidence:.2f}/{detection.color_name} "
             f"brightness={detection.brightness_score:.2f} "
             f"saturation={detection.saturation_score:.2f} "
             f"movement={detection.movement_score:.2f} "
@@ -416,7 +578,7 @@ class Camera:
             cv2.drawContours(debug, [item.contour], -1, color, 1)
             if item.radius > 0:
                 cv2.circle(debug, item.center, int(item.radius), color, 1)
-            label = f"{item.rejection_reason} {item.confidence:.2f}"
+            label = f"{item.rejection_reason} {item.confidence:.2f} {item.color_name}"
             cv2.putText(
                 debug,
                 label,
