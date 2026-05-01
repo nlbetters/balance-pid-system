@@ -32,6 +32,7 @@ MAX_FILL_RATIO = 1.18
 MIN_ASPECT_RATIO = 0.70
 MAX_ASPECT_RATIO = 1.30
 MIN_CONFIDENCE = 0.68
+MIN_COLOR_CONFIDENCE = 0.45
 
 # Tracking checks and PID-friendly smoothing.
 MAX_FRAME_JUMP = 55
@@ -51,8 +52,11 @@ class Detection:
     radius: float
     area: float
     confidence: float
+    color_confidence: float
     circularity: float
     fill_ratio: float
+    edge_distance: float
+    rejection_reason: str
     contour: np.ndarray
 
 
@@ -83,6 +87,8 @@ class Camera:
         self.fps = 0.0
         self.debug_frame = None
         self.debug_mask = None
+        self.debug_detections = []
+        self._debug_frame_index = 0
 
         self.picam2.start()
 
@@ -119,7 +125,7 @@ class Camera:
         cv2.destroyAllWindows()
 
     def coordinate(self, image):
-        detection, mask, rejected = self._detect_ball(image)
+        detection, mask, debug_detections = self._detect_ball(image)
         self._update_timing()
 
         if detection is not None:
@@ -139,7 +145,7 @@ class Camera:
                 self.last_valid_position = None
 
         if self.debug:
-            self._build_debug_frame(image, mask, detection, rejected)
+            self._build_debug_frame(image, mask, detection, debug_detections)
 
         return self.last_center
 
@@ -173,103 +179,155 @@ class Camera:
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         best = None
-        rejected = []
+        debug_detections = []
+
+        if self.debug:
+            self._debug_frame_index += 1
+            print(
+                f"vision frame {self._debug_frame_index} "
+                f"mask_pixels={cv2.countNonZero(mask)} contours={len(contours)}"
+            )
 
         for contour in contours:
-            detection, reason = self._score_contour(contour, image.shape)
-            if detection is None:
-                if self.debug:
-                    rejected.append((contour, reason))
+            detection = self._score_contour(contour, image.shape, mask)
+            if self.debug:
+                debug_detections.append(detection)
+                self._print_detection_debug(detection)
+            if detection.rejection_reason != "accepted":
                 continue
             if best is None or detection.confidence > best.confidence:
                 best = detection
 
         if best is not None and best.confidence >= MIN_CONFIDENCE:
-            return best, mask, rejected
-        return None, mask, rejected
+            return best, mask, debug_detections
+        return None, mask, debug_detections
 
-    def _score_contour(self, contour, image_shape):
+    def _score_contour(self, contour, image_shape, mask):
         area = cv2.contourArea(contour)
+        center = (0, 0)
+        radius = 0.0
+        circularity = 0.0
+        fill_ratio = 0.0
+        aspect_ratio = 0.0
+        edge_distance = 0.0
+        color_confidence = 0.0
+        confidence = 0.0
+
+        if area > 0:
+            (x_float, y_float), radius = cv2.minEnclosingCircle(contour)
+            center = (int(round(x_float)), int(round(y_float)))
+            edge_distance = self._edge_distance(center, radius, image_shape)
+            color_confidence = self._color_confidence(contour, mask)
+
+            perimeter = cv2.arcLength(contour, True)
+            if perimeter > 0:
+                circularity = (4.0 * np.pi * area) / (perimeter * perimeter)
+
+            enclosing_area = np.pi * radius * radius
+            fill_ratio = area / enclosing_area if enclosing_area else 0.0
+
+            _, _, w, h = cv2.boundingRect(contour)
+            aspect_ratio = w / float(h) if h else 0.0
+            confidence = self._confidence_score(
+                area=area,
+                radius=radius,
+                circularity=circularity,
+                fill_ratio=fill_ratio,
+                aspect_ratio=aspect_ratio,
+                center=center,
+                color_confidence=color_confidence,
+            )
+
+        def result(reason):
+            return Detection(
+                center=center,
+                radius=radius,
+                area=area,
+                confidence=confidence,
+                color_confidence=color_confidence,
+                circularity=circularity,
+                fill_ratio=fill_ratio,
+                edge_distance=edge_distance,
+                rejection_reason=reason,
+                contour=contour,
+            )
+
         if area < MIN_CONTOUR_AREA or area > MAX_CONTOUR_AREA:
-            return None, "area"
-
-        (x_float, y_float), radius = cv2.minEnclosingCircle(contour)
+            return result("area")
         if radius < MIN_RADIUS or radius > MAX_RADIUS:
-            return None, "radius"
+            return result("radius")
 
-        height, width = image_shape[:2]
-        x, y = int(round(x_float)), int(round(y_float))
-        if (
-            x - radius < EDGE_MARGIN
-            or x + radius > width - EDGE_MARGIN
-            or y - radius < EDGE_MARGIN
-            or y + radius > height - EDGE_MARGIN
-        ):
-            return None, "edge"
+        if edge_distance < EDGE_MARGIN:
+            return result("edge")
 
         if self.last_valid_position is not None:
-            jump = np.hypot(x - self.last_valid_position[0], y - self.last_valid_position[1])
+            jump = np.hypot(center[0] - self.last_valid_position[0], center[1] - self.last_valid_position[1])
             if jump > MAX_FRAME_JUMP:
-                return None, "jump"
+                return result("jump")
 
-        perimeter = cv2.arcLength(contour, True)
-        if perimeter <= 0:
-            return None, "perimeter"
-        circularity = (4.0 * np.pi * area) / (perimeter * perimeter)
         if circularity < MIN_CIRCULARITY:
-            return None, "circularity"
-
-        _, _, w, h = cv2.boundingRect(contour)
-        aspect_ratio = w / float(h) if h else 0.0
+            return result("circularity")
         if aspect_ratio < MIN_ASPECT_RATIO or aspect_ratio > MAX_ASPECT_RATIO:
-            return None, "aspect"
-
-        enclosing_area = np.pi * radius * radius
-        fill_ratio = area / enclosing_area if enclosing_area else 0.0
+            return result("aspect")
         if fill_ratio < MIN_FILL_RATIO or fill_ratio > MAX_FILL_RATIO:
-            return None, "fill"
+            return result("fill")
+        if color_confidence < MIN_COLOR_CONFIDENCE:
+            return result("color")
+        if confidence < MIN_CONFIDENCE:
+            return result("confidence")
 
-        confidence = self._confidence_score(
-            area=area,
-            radius=radius,
-            circularity=circularity,
-            fill_ratio=fill_ratio,
-            aspect_ratio=aspect_ratio,
-            center=(x, y),
-        )
-        return Detection(
-            center=(x, y),
-            radius=radius,
-            area=area,
-            confidence=confidence,
-            circularity=circularity,
-            fill_ratio=fill_ratio,
-            contour=contour,
-        ), "accepted"
+        return result("accepted")
 
-    def _confidence_score(self, area, radius, circularity, fill_ratio, aspect_ratio, center):
+    def _confidence_score(self, area, radius, circularity, fill_ratio, aspect_ratio, center, color_confidence):
         circularity_score = np.clip((circularity - MIN_CIRCULARITY) / 0.35, 0.0, 1.0)
         fill_score = np.clip(1.0 - abs(fill_ratio - 0.78) / 0.35, 0.0, 1.0)
         aspect_score = np.clip(1.0 - abs(1.0 - aspect_ratio) / 0.30, 0.0, 1.0)
-
-        radius_mid = (MIN_RADIUS + MAX_RADIUS) / 2.0
-        radius_span = (MAX_RADIUS - MIN_RADIUS) / 2.0
-        radius_score = np.clip(1.0 - abs(radius - radius_mid) / radius_span, 0.0, 1.0)
 
         motion_score = 1.0
         if self.last_valid_position is not None:
             jump = np.hypot(center[0] - self.last_valid_position[0], center[1] - self.last_valid_position[1])
             motion_score = np.clip(1.0 - jump / MAX_FRAME_JUMP, 0.0, 1.0)
 
-        # Area is a light tie-breaker: shape and motion matter more than size.
-        area_score = np.clip((area - MIN_CONTOUR_AREA) / (MAX_CONTOUR_AREA - MIN_CONTOUR_AREA), 0.0, 1.0)
+        radius_score = 1.0 if MIN_RADIUS <= radius <= MAX_RADIUS else 0.0
+        area_score = 1.0 if MIN_CONTOUR_AREA <= area <= MAX_CONTOUR_AREA else 0.0
         return float(
-            0.30 * circularity_score
-            + 0.22 * fill_score
-            + 0.18 * aspect_score
-            + 0.15 * motion_score
-            + 0.10 * radius_score
+            0.24 * circularity_score
+            + 0.20 * fill_score
+            + 0.16 * aspect_score
+            + 0.16 * color_confidence
+            + 0.12 * motion_score
+            + 0.07 * radius_score
             + 0.05 * area_score
+        )
+
+    def _edge_distance(self, center, radius, image_shape):
+        height, width = image_shape[:2]
+        x, y = center
+        return float(min(x - radius, y - radius, width - x - radius, height - y - radius))
+
+    @staticmethod
+    def _color_confidence(contour, mask):
+        contour_mask = np.zeros(mask.shape, dtype=np.uint8)
+        cv2.drawContours(contour_mask, [contour], -1, 255, thickness=-1)
+        contour_pixels = cv2.countNonZero(contour_mask)
+        if contour_pixels == 0:
+            return 0.0
+        matched_pixels = cv2.countNonZero(cv2.bitwise_and(mask, mask, mask=contour_mask))
+        return float(matched_pixels / contour_pixels)
+
+    @staticmethod
+    def _print_detection_debug(detection):
+        print(
+            "vision contour "
+            f"center={detection.center} "
+            f"area={detection.area:.1f} "
+            f"radius={detection.radius:.1f} "
+            f"circularity={detection.circularity:.2f} "
+            f"fill={detection.fill_ratio:.2f} "
+            f"edge={detection.edge_distance:.1f} "
+            f"color={detection.color_confidence:.2f} "
+            f"confidence={detection.confidence:.2f} "
+            f"reason={detection.rejection_reason}"
         )
 
     def _smooth_position(self, center):
@@ -288,11 +346,26 @@ class Camera:
             instant_fps = 1.0 / dt
             self.fps = instant_fps if self.fps == 0.0 else (0.85 * self.fps + 0.15 * instant_fps)
 
-    def _build_debug_frame(self, image, mask, detection, rejected):
+    def _build_debug_frame(self, image, mask, detection, debug_detections):
         debug = image.copy()
-        cv2.drawContours(debug, [item[0] for item in rejected], -1, (255, 0, 0), 1)
+        for item in debug_detections:
+            accepted = item.rejection_reason == "accepted"
+            color = (0, 255, 0) if accepted else (255, 0, 0)
+            cv2.drawContours(debug, [item.contour], -1, color, 1)
+            if item.radius > 0:
+                cv2.circle(debug, item.center, int(item.radius), color, 1)
+            label = f"{item.rejection_reason} {item.confidence:.2f}"
+            cv2.putText(
+                debug,
+                label,
+                (max(0, item.center[0] - 24), max(10, item.center[1] - 8)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.30,
+                color,
+                1,
+                cv2.LINE_AA,
+            )
         if detection is not None:
-            cv2.circle(debug, detection.center, int(detection.radius), (0, 255, 0), 2)
             self._draw_crosshair(debug, detection.center, (0, 255, 0))
         self._draw_crosshair(debug, self.frame_center, (255, 255, 0))
         cv2.putText(
@@ -307,6 +380,7 @@ class Camera:
         )
         self.debug_frame = debug
         self.debug_mask = mask
+        self.debug_detections = debug_detections
 
     @staticmethod
     def _draw_crosshair(image, center, color):
