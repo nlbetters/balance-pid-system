@@ -143,6 +143,9 @@ def pid_loop():
             #print(sleep_time)
             time.sleep(sleep_time)
             
+# Move servos to the neutral position before starting the control loop.
+robot.initialize()
+
 # Start threads
 threading.Thread(target=capture, daemon=True).start()
 threading.Thread(target=process, daemon=True).start()
