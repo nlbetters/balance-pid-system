@@ -1,118 +1,84 @@
 import math
 import time
+import cv2
+from PID import PIDcontroller
+from robot import Robot
 
-MIN_DT = 0.001
-MAX_DT = 0.05
-INTEGRAL_LIMIT = 250.0
-DERIVATIVE_LIMIT = 5000.0
-OUTPUT_LIMIT = 4.0
-OUTPUT_RATE_LIMIT = 1.2
-ERROR_DEADBAND = 2.0
+# Constants
+COMMAND_THETA_GAIN = 1.4
+MAX_COMMAND_THETA = 8.0
+MIN_ACTIVE_THETA = 0.2
+PIXEL_DEADBAND = 4.0
+COMMAND_PHI_OFFSET_DEG = 0.0
+INVERT_X_RESPONSE = True
+INVERT_Y_RESPONSE = True
 
-class PIDcontroller:
-    def __init__(self, kp, ki, kd, alpha, beta, max_theta, conversion="linear"): #"linear" or "tanh"
+# Asymmetric correction tuning.
+# Servo channel 4 is the +Y side of the platform. If the ball gets stuck on that side,
+# boost the +Y command so servo 4/12 push harder in that direction.
+SERVO4_SIDE_Y_GAIN = 1.45
+SERVO4_SIDE_MIN_THETA = 0.55
 
-        self.kp, self.ki, self.kd = kp, ki, kd
-        self.alpha = alpha  #Exponential Filter: α⋅x + (1-α)⋅x_last
-        self.beta = beta  #Coefficient for converting magnitude, either βx or tanh(βx)
-        self.max_theta = max_theta
+DEBUG_DIRECTION_TEST = False
 
-        if conversion == "linear":
-            self.magnitude_convert = 1 #Linear
-        elif conversion == "tanh":
-            self.magnitude_convert = 0 #Tanh
-        else:
-            self.magnitude_convert = -1
- 
-        self.prev_out_x = 0.0
-        self.prev_err_x = 0.0  
-        self.prev_out_y = 0.0
-        self.prev_err_y = 0.0
+def update_robot_pos(robot, pid_controller, target_pos, current_pos):
+    # Compute PID output
+    theta, phi = pid_controller.pid(target_pos, current_pos)
 
-        self.sum_err_x = 0.0  #Integral
-        self.sum_err_y = 0.0  #Integral
-        
-        self.last_time = None
-        self.has_previous_error = False
+    # Convert spherical to cartesian
+    phi_rad = math.radians(phi + COMMAND_PHI_OFFSET_DEG)
+    command_x = theta * math.cos(phi_rad)
+    command_y = theta * math.sin(phi_rad)
 
-    def pid(self, target, current):
+    # Apply inversion
+    if INVERT_X_RESPONSE:
+        command_x *= -1
+    if INVERT_Y_RESPONSE:
+        command_y *= -1
 
-        # Time step. Clamp dt so derivative does not spike if the loop timing jitters.
-        new_time = time.perf_counter()
-        if self.last_time is None:
-            dt = MIN_DT
-        else:
-            dt = new_time - self.last_time
-            dt = max(MIN_DT, min(dt, MAX_DT))
+    servo4_boost_active = command_y > 0
+    if servo4_boost_active:
+        command_y *= SERVO4_SIDE_Y_GAIN
 
-        # errors
-        err_x = current[0] - target[0]
-        err_y = current[1] - target[1]
+    theta = math.hypot(command_x, command_y) * COMMAND_THETA_GAIN
 
-        # Ignore tiny camera jitter around the target.
-        if abs(err_x) < ERROR_DEADBAND:
-            err_x = 0.0
-        if abs(err_y) < ERROR_DEADBAND:
-            err_y = 0.0
+    error_pixels = math.hypot(current_pos[0] - target_pos[0], current_pos[1] - target_pos[1])
+    if error_pixels <= PIXEL_DEADBAND:
+        theta = 0.0
+    elif servo4_boost_active and theta < SERVO4_SIDE_MIN_THETA:
+        theta = SERVO4_SIDE_MIN_THETA
+    elif theta < MIN_ACTIVE_THETA:
+        theta = MIN_ACTIVE_THETA
 
-        self.sum_err_x += err_x * dt
-        self.sum_err_y += err_y * dt
-        self.sum_err_x = max(-INTEGRAL_LIMIT, min(self.sum_err_x, INTEGRAL_LIMIT))
-        self.sum_err_y = max(-INTEGRAL_LIMIT, min(self.sum_err_y, INTEGRAL_LIMIT))
+    # Limit maximum command theta
+    if theta > MAX_COMMAND_THETA:
+        theta = MAX_COMMAND_THETA
 
-        if self.has_previous_error:
-            d_err_x = (err_x - self.prev_err_x) / dt
-            d_err_y = (err_y - self.prev_err_y) / dt
-            d_err_x = max(-DERIVATIVE_LIMIT, min(d_err_x, DERIVATIVE_LIMIT))
-            d_err_y = max(-DERIVATIVE_LIMIT, min(d_err_y, DERIVATIVE_LIMIT))
-        else:
-            d_err_x = 0.0
-            d_err_y = 0.0
+    # Update robot servo commands
+    robot.set_servo_angles(theta, phi)
 
-        #output
-        pid_x = self.kp * err_x + self.ki * self.sum_err_x + self.kd * d_err_x
-        pid_y = self.kp * err_y + self.ki * self.sum_err_y + self.kd * d_err_y
-        filtered_x = self.alpha * pid_x + (1 - self.alpha) * self.prev_out_x
-        filtered_y = self.alpha * pid_y + (1 - self.alpha) * self.prev_out_y
+    if DEBUG_DIRECTION_TEST:
+        print(
+            f"target=({target_pos[0]:.1f},{target_pos[1]:.1f}) current=({current_pos[0]:.1f},{current_pos[1]:.1f}) "
+            f"cmd_xy=({command_x:.2f},{command_y:.2f}) theta={theta:.2f} phi={phi:.1f} "
+            f"s4boost={servo4_boost_active} "
+        )
 
-        # Limit controller output so one noisy frame cannot command a hard tilt.
-        filtered_x = max(-OUTPUT_LIMIT, min(filtered_x, OUTPUT_LIMIT))
-        filtered_y = max(-OUTPUT_LIMIT, min(filtered_y, OUTPUT_LIMIT))
+def main():
+    # Initialize PID controller and robot
+    pid_controller = PIDcontroller(kp=1.0, ki=0.1, kd=0.05, alpha=0.7, beta=1.0, max_theta=MAX_COMMAND_THETA)
+    robot = Robot()
 
-        # Limit output change per frame for smoother servo motion.
-        dx = filtered_x - self.prev_out_x
-        dy = filtered_y - self.prev_out_y
-        dx = max(-OUTPUT_RATE_LIMIT, min(dx, OUTPUT_RATE_LIMIT))
-        dy = max(-OUTPUT_RATE_LIMIT, min(dy, OUTPUT_RATE_LIMIT))
-        filtered_x = self.prev_out_x + dx
-        filtered_y = self.prev_out_y + dy
-        
-        #Convert to spherical coordinates
-        phi = math.degrees(math.atan2(filtered_y, filtered_x))
-        if phi < 0:
-            phi += 360
-        r = math.sqrt(filtered_x**2 + filtered_y**2)
-        if self.magnitude_convert == 1:
-            theta = min(max(0, self.beta*r), self.max_theta)
-        else:
-            theta = max(0, self.max_theta * math.tanh(self.beta*r))
+    # Example target and current positions
+    target_pos = (320, 240)
+    current_pos = (300, 220)
 
+    while True:
+        # Update robot position based on PID output
+        update_robot_pos(robot, pid_controller, target_pos, current_pos)
 
-        self.prev_err_x = err_x
-        self.prev_err_y = err_y
-        self.prev_out_x = filtered_x
-        self.prev_out_y = filtered_y
-        self.last_time = new_time
-        self.has_previous_error = True
+        # Add your main loop code here
+        time.sleep(0.01)
 
-        return theta, phi # in degrees
-
-    def reset(self):
-        self.prev_out_x = 0.0
-        self.prev_err_x = 0.0
-        self.prev_out_y = 0.0
-        self.prev_err_y = 0.0
-        self.sum_err_x = 0.0
-        self.sum_err_y = 0.0
-        self.last_time = None
-        self.has_previous_error = False
+if __name__ == "__main__":
+    main()

@@ -17,8 +17,8 @@ BALL_COLOR_PROFILES = {
     # For real balancing, only track the green ball. White/gold are too close
     # to the platform/background and create false positives.
     "green": [
-        # Tuned for the green ball. Keep saturation high enough to reject gray/white platform noise.
-        (np.array([35, 55, 35]), np.array([90, 255, 255])),
+        # Tuned for the green ball. Higher saturation rejects gray/white platform noise.
+        (np.array([40, 70, 45]), np.array([85, 255, 255])),
     ],
 }
 WHITE_LAB_RANGE = (np.array([155, 105, 105]), np.array([255, 165, 165]))
@@ -28,13 +28,13 @@ WHITE_LAB_RANGE = (np.array([155, 105, 105]), np.array([255, 165, 165]))
 PLATFORM_MASK_RADIUS = 92
 
 # Ball size limits in the 200 x 150 tracking image.
-MIN_CONTOUR_AREA = 160
+MIN_CONTOUR_AREA = 240
 MAX_CONTOUR_AREA = 7000
-MIN_RADIUS = 7
+MIN_RADIUS = 9
 MAX_RADIUS = 55
 EDGE_MARGIN = -8
-MIN_BLOB_WIDTH = 10
-MIN_BLOB_HEIGHT = 8
+MIN_BLOB_WIDTH = 14
+MIN_BLOB_HEIGHT = 12
 
 # Shape/mask quality checks.
 MIN_CIRCULARITY = 0.30
@@ -42,18 +42,19 @@ MIN_FILL_RATIO = 0.20
 MAX_FILL_RATIO = 1.45
 MIN_ASPECT_RATIO = 0.45
 MAX_ASPECT_RATIO = 1.75
-MIN_CONFIDENCE = 0.64
-MIN_INITIAL_CONFIDENCE = 0.78
-MIN_COLOR_CONFIDENCE = 0.45
+MIN_SOLIDITY = 0.45
+MIN_CONFIDENCE = 0.70
+MIN_INITIAL_CONFIDENCE = 0.84
+MIN_COLOR_CONFIDENCE = 0.55
 MIN_BRIGHTNESS_SCORE = 0.16
-MIN_SATURATION_SCORE = 0.18
+MIN_SATURATION_SCORE = 0.22
 
 # Strong green blobs are allowed even when the visible contour is not a perfect circle.
 # This helps when the ball is partly cut off by the frame/ROI but is still clearly green.
 ALLOW_STRONG_COLOR_BLOB = True
-STRONG_COLOR_CONFIDENCE = 0.82
-STRONG_COLOR_MIN_SATURATION = 0.25
-STRONG_COLOR_MIN_AREA = 160
+STRONG_COLOR_CONFIDENCE = 0.88
+STRONG_COLOR_MIN_SATURATION = 0.32
+STRONG_COLOR_MIN_AREA = 240
 
 #
 # Hough is useful for testing, but it sees platform rings, screws, and shadows as circles.
@@ -76,12 +77,12 @@ MAX_MISSED_FRAMES = 4
 
 # A new object must look like the ball for a couple frames before the control loop trusts it.
 # This prevents the tracker from immediately choosing a random circle when the ball is gone.
-REQUIRED_INITIAL_HITS = 4
-INITIAL_MATCH_DISTANCE = 16
+REQUIRED_INITIAL_HITS = 5
+INITIAL_MATCH_DISTANCE = 14
 
 # Mask cleanup.
 USE_GAUSSIAN_BLUR = True
-MORPH_KERNEL_SIZE = 3
+MORPH_KERNEL_SIZE = 5
 MORPH_OPEN_ITERATIONS = 2
 MORPH_CLOSE_ITERATIONS = 2
 USE_CLAHE = False
@@ -339,6 +340,7 @@ class Camera:
         circularity = 0.0
         fill_ratio = 0.0
         aspect_ratio = 0.0
+        solidity = 0.0
         edge_distance = 0.0
         color_confidence = 0.0
         color_name = "none"
@@ -363,6 +365,9 @@ class Camera:
 
             _, _, w, h = cv2.boundingRect(contour)
             aspect_ratio = w / float(h) if h else 0.0
+            hull = cv2.convexHull(contour)
+            hull_area = cv2.contourArea(hull)
+            solidity = area / hull_area if hull_area else 0.0
 
             if self.last_valid_position is not None:
                 jump = np.hypot(center[0] - self.last_valid_position[0], center[1] - self.last_valid_position[1])
@@ -416,6 +421,8 @@ class Camera:
             return result("radius")
         if w < MIN_BLOB_WIDTH or h < MIN_BLOB_HEIGHT:
             return result("blob_size")
+        if solidity < MIN_SOLIDITY:
+            return result("solidity")
         if edge_distance < EDGE_MARGIN:
             return result("edge")
         if self.last_valid_position is not None:
