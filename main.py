@@ -29,10 +29,10 @@ beta = 2.0
 # Main control tuning. CONTROL_HEIGHT is the platform operating height used by the
 # inverse kinematics. The controller now maps this neutral height to servo angle 45.
 CONTROL_HEIGHT = 9.0
-COMMAND_THETA_GAIN = 2.6
-MAX_COMMAND_THETA = 16.0
-MIN_ACTIVE_THETA = 0.45
-PIXEL_DEADBAND = 5.0
+COMMAND_THETA_GAIN = 1.9
+MAX_COMMAND_THETA = 10.0
+MIN_ACTIVE_THETA = 0.20
+PIXEL_DEADBAND = 4.0
 COMMAND_PHI_OFFSET_DEG = 0.0
 INVERT_X_RESPONSE = True
 INVERT_Y_RESPONSE = True
@@ -40,8 +40,8 @@ INVERT_Y_RESPONSE = True
 # Direct camera-error control is easier to tune than the polar PID direction while testing.
 # Screen left/right error maps to servo pair 4/12. Screen up/down error maps to servo pair 0/8.
 USE_DIRECT_ERROR_CONTROL = True
-DIRECT_X_TO_LR_GAIN = 0.070
-DIRECT_Y_TO_UD_GAIN = 0.028
+DIRECT_X_TO_LR_GAIN = 0.040
+DIRECT_Y_TO_UD_GAIN = 0.020
 DIRECT_LR_SIGN = -1.0
 DIRECT_UD_SIGN = -1.0
 
@@ -49,26 +49,26 @@ DIRECT_UD_SIGN = -1.0
 # The platform angle controls ball acceleration, so position-only control overshoots.
 # These terms brake the ball based on how fast it is moving in the camera frame.
 VELOCITY_DAMPING_ENABLED = True
-VELOCITY_X_TO_LR_GAIN = 0.0080
-VELOCITY_Y_TO_UD_GAIN = 0.0060
-MAX_VELOCITY_PIXELS_PER_SECOND = 350.0
+VELOCITY_X_TO_LR_GAIN = 0.0050
+VELOCITY_Y_TO_UD_GAIN = 0.0035
+MAX_VELOCITY_PIXELS_PER_SECOND = 250.0
 
 # Axis response tuning.
 # In the camera view, servo motors 4 and 12 are the left/right motors.
 # Because the camera axes are swapped in the PID call below, screen horizontal error
 # mainly shows up as command_y. Boost that whole left/right pair, not just one side.
-LEFT_RIGHT_PAIR_GAIN = 1.45
-UP_DOWN_PAIR_GAIN = 0.55
-LEFT_RIGHT_MIN_THETA = 0.80
-LEFT_RIGHT_ERROR_THRESHOLD = 20.0
+LEFT_RIGHT_PAIR_GAIN = 1.00
+UP_DOWN_PAIR_GAIN = 1.00
+LEFT_RIGHT_MIN_THETA = 0.20
+LEFT_RIGHT_ERROR_THRESHOLD = 999.0
 
 # Corner correction tuning.
 # If the ball is stuck in the bottom-right corner between motors 4 and 8,
 # both the left/right and up/down axes need to respond together instead of forcing
 # a pure left/right tilt.
-CORNER_ERROR_THRESHOLD = 24.0
+CORNER_ERROR_THRESHOLD = 999.0
 BOTTOM_RIGHT_CORNER_GAIN = 1.00
-CORNER_MIN_THETA = 1.20
+CORNER_MIN_THETA = 0.20
 
 # Dynamic stuck response.
 # If the ball is far from center and the error is not improving, slowly increase tilt.
@@ -86,7 +86,7 @@ DEBUG_DIRECTION_TEST = True
 CAMERA_HZ = 120
 DEBUG_CONTROL = True
 DEBUG_INTERVAL_SECONDS = 0.50
-DEBUG_VISION = True
+DEBUG_VISION = False
 
 
 # Initialize objects
@@ -207,10 +207,11 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
         command_x = DIRECT_UD_SIGN * raw_error_y * DIRECT_Y_TO_UD_GAIN
 
         if VELOCITY_DAMPING_ENABLED:
-            # Brake the ball's velocity so it does not shoot through the center. .
-            # This intentionally opposes velocity, not position error.
-            command_y -= DIRECT_LR_SIGN * velocity_x * VELOCITY_X_TO_LR_GAIN
-            command_x -= DIRECT_UD_SIGN * velocity_y * VELOCITY_Y_TO_UD_GAIN
+            # Brake the ball's velocity so it does not shoot through the center
+            # The damping term must oppose the ball's velocity using the same axis sign
+            # convention as the position term.
+            command_y += DIRECT_LR_SIGN * velocity_x * VELOCITY_X_TO_LR_GAIN
+            command_x += DIRECT_UD_SIGN * velocity_y * VELOCITY_Y_TO_UD_GAIN
 
         bottom_right_corner_active = (
             raw_error_x >= CORNER_ERROR_THRESHOLD
