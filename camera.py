@@ -18,7 +18,7 @@ BALL_COLOR_PROFILES = {
     # to the platform/background and create false positives.
     "green": [
         # Slightly wider green range so the darker/shadowed parts of the ball still pass.
-        (np.array([35, 40, 40]), np.array([90, 255, 255])),
+        (np.array([30, 35, 35]), np.array([95, 255, 255])),
     ],
 }
 WHITE_LAB_RANGE = (np.array([155, 105, 105]), np.array([255, 165, 165]))
@@ -28,11 +28,11 @@ WHITE_LAB_RANGE = (np.array([155, 105, 105]), np.array([255, 165, 165]))
 PLATFORM_MASK_RADIUS = 92
 
 # Ball size limits in the 200 x 150 tracking image.
-MIN_CONTOUR_AREA = 120
+MIN_CONTOUR_AREA = 90
 MAX_CONTOUR_AREA = 7000
-MIN_RADIUS = 9
-MAX_RADIUS = 45
-EDGE_MARGIN = 2
+MIN_RADIUS = 5
+MAX_RADIUS = 55
+EDGE_MARGIN = -8
 
 # Shape/mask quality checks.
 MIN_CIRCULARITY = 0.30
@@ -45,6 +45,13 @@ MIN_INITIAL_CONFIDENCE = 0.70
 MIN_COLOR_CONFIDENCE = 0.35
 MIN_BRIGHTNESS_SCORE = 0.18
 MIN_SATURATION_SCORE = 0.10
+
+# Strong green blobs are allowed even when the visible contour is not a perfect circle.
+# This helps when the ball is partly cut off by the frame/ROI but is still clearly green.
+ALLOW_STRONG_COLOR_BLOB = True
+STRONG_COLOR_CONFIDENCE = 0.75
+STRONG_COLOR_MIN_SATURATION = 0.18
+STRONG_COLOR_MIN_AREA = 90
 
 #
 # Hough is useful for testing, but it sees platform rings, screws, and shadows as circles.
@@ -281,6 +288,7 @@ class Camera:
             )
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:8]
         best = None
         debug_detections = []
 
@@ -389,6 +397,15 @@ class Camera:
                 contour=contour,
             )
 
+        strong_green_blob = (
+            ALLOW_STRONG_COLOR_BLOB
+            and color_name == "green"
+            and color_confidence >= STRONG_COLOR_CONFIDENCE
+            and saturation_score >= STRONG_COLOR_MIN_SATURATION
+            and area >= STRONG_COLOR_MIN_AREA
+            and radius <= MAX_RADIUS
+        )
+
         if area < MIN_CONTOUR_AREA or area > MAX_CONTOUR_AREA:
             return result("area")
         if radius < MIN_RADIUS or radius > MAX_RADIUS:
@@ -399,19 +416,20 @@ class Camera:
             jump = np.hypot(center[0] - self.last_valid_position[0], center[1] - self.last_valid_position[1])
             if jump > MAX_FRAME_JUMP:
                 return result("jump")
-        if circularity < MIN_CIRCULARITY:
-            return result("circularity")
-        if aspect_ratio < MIN_ASPECT_RATIO or aspect_ratio > MAX_ASPECT_RATIO:
-            return result("aspect")
-        if fill_ratio < MIN_FILL_RATIO or fill_ratio > MAX_FILL_RATIO:
-            return result("fill")
+        if not strong_green_blob:
+            if circularity < MIN_CIRCULARITY:
+                return result("circularity")
+            if aspect_ratio < MIN_ASPECT_RATIO or aspect_ratio > MAX_ASPECT_RATIO:
+                return result("aspect")
+            if fill_ratio < MIN_FILL_RATIO or fill_ratio > MAX_FILL_RATIO:
+                return result("fill")
         if color_confidence < MIN_COLOR_CONFIDENCE:
             return result("color")
         if brightness_score < MIN_BRIGHTNESS_SCORE:
             return result("brightness")
         if saturation_score < MIN_SATURATION_SCORE:
             return result("saturation")
-        if confidence < MIN_CONFIDENCE:
+        if confidence < MIN_CONFIDENCE and not strong_green_blob:
             return result("confidence")
 
         return result("accepted")
