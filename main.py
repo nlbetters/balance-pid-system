@@ -37,11 +37,13 @@ COMMAND_PHI_OFFSET_DEG = 0.0
 INVERT_X_RESPONSE = True
 INVERT_Y_RESPONSE = True
 
-# Asymmetric correction tuning.
-# Servo channel 4 is the +Y side of the platform. If the ball gets stuck on that side,
-# boost the +Y command so servo 4/12 push harder in that direction.
-SERVO4_SIDE_Y_GAIN = 1.75
-SERVO4_SIDE_MIN_THETA = 0.90
+# Axis response tuning.
+# In the camera view, servo motors 4 and 12 are the left/right motors.
+# Because the camera axes are swapped in the PID call below, screen horizontal error
+# mainly shows up as command_y. Boost that whole left/right pair, not just one side.
+LEFT_RIGHT_PAIR_GAIN = 2.15
+UP_DOWN_PAIR_GAIN = 0.80
+LEFT_RIGHT_MIN_THETA = 1.10
 
 # Set this True during first tests. It prints the raw ball error and the final tilt command
 # so we can quickly flip X/Y direction if the platform pushes the ball away from center.
@@ -142,15 +144,17 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
     if INVERT_Y_RESPONSE:
         command_y *= -1
 
-    servo4_boost_active = command_y > 0
-    if servo4_boost_active:
-        command_y *= SERVO4_SIDE_Y_GAIN
+    # Screen horizontal error is handled by the left/right servo pair 4/12.
+    # Boost left/right correction and slightly calm the up/down pair to reduce vertical oscillation.
+    left_right_boost_active = abs(command_y) > 0.0
+    command_y *= LEFT_RIGHT_PAIR_GAIN
+    command_x *= UP_DOWN_PAIR_GAIN
 
     theta = math.hypot(command_x, command_y) * COMMAND_THETA_GAIN
     if error_pixels <= PIXEL_DEADBAND:
         theta = 0.0
-    elif servo4_boost_active and theta < SERVO4_SIDE_MIN_THETA:
-        theta = SERVO4_SIDE_MIN_THETA
+    elif left_right_boost_active and abs(command_y) > abs(command_x) and theta < LEFT_RIGHT_MIN_THETA:
+        theta = LEFT_RIGHT_MIN_THETA
     elif theta < MIN_ACTIVE_THETA:
         theta = MIN_ACTIVE_THETA
     theta = min(theta, robotkinematics.maxtheta, MAX_COMMAND_THETA)
@@ -166,7 +170,7 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
                 f"ball=({x:.1f},{y:.1f}) target=({x_t:.1f},{y_t:.1f}) "
                 f"err_px=({raw_error_x:.1f},{raw_error_y:.1f}) mag={error_pixels:.1f} "
                 f"cmd_xy=({command_x:.2f},{command_y:.2f}) theta={theta:.2f} phi={phi:.1f} "
-                f"s4boost={servo4_boost_active} "
+                f"lrboost={left_right_boost_active} "
                 f"servos={[round(a, 1) for a in robotcontroller.get_motor_angles()]}"
             )
         else:
