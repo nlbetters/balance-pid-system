@@ -45,6 +45,14 @@ DIRECT_Y_TO_UD_GAIN = 0.055
 DIRECT_LR_SIGN = -1.0
 DIRECT_UD_SIGN = -1.0
 
+# Velocity damping.
+# The platform angle controls ball acceleration, so position-only control overshoots.
+# These terms brake the ball based on how fast it is moving in the camera frame.
+VELOCITY_DAMPING_ENABLED = True
+VELOCITY_X_TO_LR_GAIN = 0.0035
+VELOCITY_Y_TO_UD_GAIN = 0.0025
+MAX_VELOCITY_PIXELS_PER_SECOND = 350.0
+
 # Axis response tuning.
 # In the camera view, servo motors 4 and 12 are the left/right motors.
 # Because the camera axes are swapped in the PID call below, screen horizontal error
@@ -94,6 +102,9 @@ pid_was_reset_for_lost_ball = False
 stuck_error_previous = None
 stuck_boost = 1.0
 last_stuck_time = None
+prev_ball_x = None
+prev_ball_y = None
+prev_ball_time = None
 
 # Initialize ball position at the camera target.
 x, y = cam.frame_center
@@ -157,16 +168,36 @@ def process():
 
 def reset_stuck_response():
     global stuck_error_previous, stuck_boost, last_stuck_time
+    global prev_ball_x, prev_ball_y, prev_ball_time
     stuck_error_previous = None
     stuck_boost = 1.0
     last_stuck_time = None
+    prev_ball_x = None
+    prev_ball_y = None
+    prev_ball_time = None
 
 def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, x, y):
     # x_t, y_t: target position, x, y: current position
     global last_debug_time, stuck_error_previous, stuck_boost, last_stuck_time
+    global prev_ball_x, prev_ball_y, prev_ball_time
     error_pixels = math.hypot(x - x_t, y - y_t)
     raw_error_x = x - x_t
     raw_error_y = y - y_t
+
+    now_velocity = time.perf_counter()
+    if prev_ball_time is None:
+        velocity_x = 0.0
+        velocity_y = 0.0
+    else:
+        dt_velocity = max(0.001, min(now_velocity - prev_ball_time, 0.1))
+        velocity_x = (x - prev_ball_x) / dt_velocity
+        velocity_y = (y - prev_ball_y) / dt_velocity
+        velocity_x = max(-MAX_VELOCITY_PIXELS_PER_SECOND, min(velocity_x, MAX_VELOCITY_PIXELS_PER_SECOND))
+        velocity_y = max(-MAX_VELOCITY_PIXELS_PER_SECOND, min(velocity_y, MAX_VELOCITY_PIXELS_PER_SECOND))
+
+    prev_ball_x = x
+    prev_ball_y = y
+    prev_ball_time = now_velocity
 
     if USE_DIRECT_ERROR_CONTROL:
         # Direct mapping from camera error to platform command.
@@ -174,6 +205,12 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
         # raw_error_y > 0 means the ball is below center in the camera view.
         command_y = DIRECT_LR_SIGN * raw_error_x * DIRECT_X_TO_LR_GAIN
         command_x = DIRECT_UD_SIGN * raw_error_y * DIRECT_Y_TO_UD_GAIN
+
+        if VELOCITY_DAMPING_ENABLED:
+            # Brake the ball's velocity so it does not shoot through the center.
+            command_y += DIRECT_LR_SIGN * velocity_x * VELOCITY_X_TO_LR_GAIN
+            command_x += DIRECT_UD_SIGN * velocity_y * VELOCITY_Y_TO_UD_GAIN
+
         bottom_right_corner_active = (
             raw_error_x >= CORNER_ERROR_THRESHOLD
             and raw_error_y >= CORNER_ERROR_THRESHOLD
@@ -247,13 +284,14 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
 
     robotcontroller.Goto_N_time_spherical(theta, phi, CONTROL_HEIGHT)
 
-    now = time.perf_counter()
+    now = time.perf_counter() #BOMBA
     if DEBUG_CONTROL and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
         last_debug_time = now
         if DEBUG_DIRECTION_TEST:
             print(
                 f"ball=({x:.1f},{y:.1f}) target=({x_t:.1f},{y_t:.1f}) "
                 f"err_px=({raw_error_x:.1f},{raw_error_y:.1f}) mag={error_pixels:.1f} "
+                f"vel=({velocity_x:.1f},{velocity_y:.1f}) "
                 f"cmd_xy=({command_x:.2f},{command_y:.2f}) theta={theta:.2f} phi={phi:.1f} "
                 f"maxtheta={robotkinematics.maxtheta:.2f} stuckboost={stuck_boost:.2f} "
                 f"lrboost={left_right_boost_active} corner={bottom_right_corner_active} "
