@@ -29,10 +29,10 @@ beta = 2.0
 # Main control tuning. CONTROL_HEIGHT is the platform operating height used by the
 # inverse kinematics. The controller now maps this neutral height to servo angle 45.
 CONTROL_HEIGHT = 9.0
-COMMAND_THETA_GAIN = 2.3
-MAX_COMMAND_THETA = 15.0
-MIN_ACTIVE_THETA = 0.60
-PIXEL_DEADBAND = 4.0
+COMMAND_THETA_GAIN = 6.0
+MAX_COMMAND_THETA = 30.0
+MIN_ACTIVE_THETA = 2.50
+PIXEL_DEADBAND = 1.5
 COMMAND_PHI_OFFSET_DEG = 0.0
 INVERT_X_RESPONSE = True
 INVERT_Y_RESPONSE = True
@@ -40,8 +40,8 @@ INVERT_Y_RESPONSE = True
 # Direct camera-error control is easier to tune than the polar PID direction while testing.
 # Screen left/right error maps to servo pair 4/12. Screen up/down error maps to servo pair 0/8.
 USE_DIRECT_ERROR_CONTROL = True
-DIRECT_X_TO_LR_GAIN = 0.065
-DIRECT_Y_TO_UD_GAIN = 0.045
+DIRECT_X_TO_LR_GAIN = 0.220
+DIRECT_Y_TO_UD_GAIN = 0.155
 DIRECT_LR_SIGN = -1.0
 DIRECT_UD_SIGN = -1.0
 
@@ -49,9 +49,9 @@ DIRECT_UD_SIGN = -1.0
 # In the camera view, servo motors 4 and 12 are the left/right motors.
 # Because the camera axes are swapped in the PID call below, screen horizontal error
 # mainly shows up as command_y. Boost that whole left/right pair, not just one side.
-LEFT_RIGHT_PAIR_GAIN = 1.55
-UP_DOWN_PAIR_GAIN = 0.90
-LEFT_RIGHT_MIN_THETA = 1.25
+LEFT_RIGHT_PAIR_GAIN = 3.00
+UP_DOWN_PAIR_GAIN = 1.60
+LEFT_RIGHT_MIN_THETA = 4.00
 
 # Set this True during first tests. It prints the raw ball error and the final tilt command
 # so we can quickly flip X/Y direction if the platform pushes the ball away from center.
@@ -158,7 +158,6 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
         if INVERT_Y_RESPONSE:
             command_y *= -1
 
-    # CHANGE TO TEXT LET ME PUSH TO MAIN
     # Screen horizontal error is handled by the left/right servo pair 4/12.
     # Boost left/right correction and slightly calm the up/down pair to reduce vertical oscillation.
     left_right_boost_active = abs(command_y) > abs(command_x)
@@ -172,7 +171,9 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
         theta = LEFT_RIGHT_MIN_THETA
     elif theta < MIN_ACTIVE_THETA:
         theta = MIN_ACTIVE_THETA
-    theta = min(theta, robotkinematics.maxtheta, MAX_COMMAND_THETA)
+    # Use MAX_COMMAND_THETA as the main software limit while tuning.
+    # robotkinematics.maxtheta can be overly conservative and may cap the tilt too early.
+    theta = min(theta, MAX_COMMAND_THETA)
     phi = (math.degrees(math.atan2(command_y, command_x)) + COMMAND_PHI_OFFSET_DEG) % 360
 
     robotcontroller.Goto_N_time_spherical(theta, phi, CONTROL_HEIGHT)
@@ -185,6 +186,7 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
                 f"ball=({x:.1f},{y:.1f}) target=({x_t:.1f},{y_t:.1f}) "
                 f"err_px=({raw_error_x:.1f},{raw_error_y:.1f}) mag={error_pixels:.1f} "
                 f"cmd_xy=({command_x:.2f},{command_y:.2f}) theta={theta:.2f} phi={phi:.1f} "
+                f"maxtheta={robotkinematics.maxtheta:.2f} "
                 f"lrboost={left_right_boost_active} "
                 f"servos={[round(a, 1) for a in robotcontroller.get_motor_angles()]}"
             )
