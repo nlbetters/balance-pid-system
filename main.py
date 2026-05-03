@@ -54,6 +54,14 @@ UP_DOWN_PAIR_GAIN = 0.80
 LEFT_RIGHT_MIN_THETA = 8.00
 LEFT_RIGHT_ERROR_THRESHOLD = 10.0
 
+# Dynamic stuck response.
+# If the ball is far from center and the error is not improving, slowly increase tilt.
+DYNAMIC_TILT_ENABLED = True
+STUCK_ERROR_THRESHOLD = 12.0
+STUCK_IMPROVEMENT_THRESHOLD = 1.0
+STUCK_BOOST_RATE = 0.85
+STUCK_BOOST_MAX = 2.75
+
 # Set this True during first tests. It prints the raw ball error and the final tilt command
 # so we can quickly flip X/Y direction if the platform pushes the ball away from center.
 DEBUG_DIRECTION_TEST = True
@@ -75,6 +83,9 @@ model.max_theta(CONTROL_HEIGHT)
 PID = PIDcontroller(kp, ki, kd, alpha, beta, max_theta=model.maxtheta, conversion="tanh")
 last_debug_time = 0.0
 pid_was_reset_for_lost_ball = False
+stuck_error_previous = None
+stuck_boost = 1.0
+last_stuck_time = None
 
 # Initialize ball position at the camera target.
 x, y = cam.frame_center
@@ -109,6 +120,7 @@ def process():
             # This avoids chasing noise or stale camera positions.
             if not pid_was_reset_for_lost_ball:
                 PID.reset()
+                reset_stuck_response()
                 robot.Goto_N_time_spherical(0.0, 0.0, CONTROL_HEIGHT)
                 pid_was_reset_for_lost_ball = True
                 if DEBUG_CONTROL:
@@ -135,9 +147,15 @@ def process():
             time.sleep(sleep_time)
 
 
+def reset_stuck_response():
+    global stuck_error_previous, stuck_boost, last_stuck_time
+    stuck_error_previous = None
+    stuck_boost = 1.0
+    last_stuck_time = None
+
 def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, x, y):
     # x_t, y_t: target position, x, y: current position
-    global last_debug_time
+    global last_debug_time, stuck_error_previous, stuck_boost, last_stuck_time
     error_pixels = math.hypot(x - x_t, y - y_t)
     raw_error_x = x - x_t
     raw_error_y = y - y_t
@@ -167,8 +185,31 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
         command_y *= LEFT_RIGHT_PAIR_GAIN
         command_x *= UP_DOWN_PAIR_GAIN
     else:
-        command_y *= 1.50 # update
+        command_y *= 1.50
         command_x *= 1.00
+
+    if DYNAMIC_TILT_ENABLED:
+        now_stuck = time.perf_counter()
+        if last_stuck_time is None:
+            dt_stuck = 0.0
+        else:
+            dt_stuck = max(0.0, min(now_stuck - last_stuck_time, 0.2))
+
+        if stuck_error_previous is None or error_pixels <= PIXEL_DEADBAND:
+            stuck_boost = 1.0
+        else:
+            error_improvement = stuck_error_previous - error_pixels
+            if error_pixels >= STUCK_ERROR_THRESHOLD and error_improvement < STUCK_IMPROVEMENT_THRESHOLD:
+                stuck_boost = min(STUCK_BOOST_MAX, stuck_boost + STUCK_BOOST_RATE * dt_stuck)
+            else:
+                stuck_boost = max(1.0, stuck_boost - STUCK_BOOST_RATE * dt_stuck)
+
+        command_x *= stuck_boost
+        command_y *= stuck_boost
+        stuck_error_previous = error_pixels
+        last_stuck_time = now_stuck
+    else:
+        stuck_boost = 1.0
 
     theta = math.hypot(command_x, command_y) * COMMAND_THETA_GAIN
     if error_pixels <= PIXEL_DEADBAND:
@@ -196,7 +237,7 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
                 f"ball=({x:.1f},{y:.1f}) target=({x_t:.1f},{y_t:.1f}) "
                 f"err_px=({raw_error_x:.1f},{raw_error_y:.1f}) mag={error_pixels:.1f} "
                 f"cmd_xy=({command_x:.2f},{command_y:.2f}) theta={theta:.2f} phi={phi:.1f} "
-                f"maxtheta={robotkinematics.maxtheta:.2f} "
+                f"maxtheta={robotkinematics.maxtheta:.2f} stuckboost={stuck_boost:.2f} "
                 f"lrboost={left_right_boost_active} "
                 f"servos={[round(a, 1) for a in robotcontroller.get_motor_angles()]}"
             )

@@ -189,11 +189,6 @@ class RobotKinematics:
             if valid(theta_mid):
                 theta_low = theta_mid
             else:
-                theta_high = theta_mid
+                theta_high = theta_high - (theta_high - theta_low) / 2 if theta_high - theta_low > tol else theta_high
 
         self.maxtheta = max(0, math.degrees(round(theta_low, 4)) - 0.5)
-
-
-
-
-    
