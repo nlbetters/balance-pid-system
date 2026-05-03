@@ -24,7 +24,7 @@ SERVO_DIRECTION_PIVOT = DEFAULT_SERVO_ANGLE
 # Servo pair layout:
 # channel 0 is opposite channel 8, and channel 4 is opposite channel 12.
 # Leave SERVO_DIRECTIONS as [1, 1, 1, 1] unless a physical servo is mounted backward.
-MAX_SERVO_STEP_PER_COMMAND = 2.0
+MAX_SERVO_STEP_PER_COMMAND = 6.0
 
 def clamp(value, lower=MIN_SERVO_ANGLE, upper=MAX_SERVO_ANGLE):
     return max(lower, min(value, upper))

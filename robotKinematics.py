@@ -142,16 +142,19 @@ class RobotKinematics:
         self.h = h
         self.max_theta(h)
 
-        theta = min(theta, self.maxtheta)
+        # Do not clamp theta to self.maxtheta here while tuning the real robot.
+        # main.py already applies the software tilt limit, and this extra clamp was
+        # preventing the physical robot from matching the larger motion seen in app.py.
+        requested_theta = theta
 
-        a = math.sin(math.radians(theta)) * math.cos(math.radians(phi))
-        b = math.sin(math.radians(theta)) * math.sin(math.radians(phi))
-        c = math.cos(math.radians(theta))
+        a = math.sin(math.radians(requested_theta)) * math.cos(math.radians(phi))
+        b = math.sin(math.radians(requested_theta)) * math.sin(math.radians(phi))
+        c = math.cos(math.radians(requested_theta))
 
         try:
             self.solve_inverse_kinematics_vector(a, b, c, h)
         except Exception as e:
-            print(a, b, c, h, theta, phi)
+            print(a, b, c, h, requested_theta, phi)
             pass
 
     def max_theta(self, h, tol=1e-3):
@@ -189,6 +192,6 @@ class RobotKinematics:
             if valid(theta_mid):
                 theta_low = theta_mid
             else:
-                theta_high = theta_high - (theta_high - theta_low) / 2 if theta_high - theta_low > tol else theta_high
+                theta_high = theta_mid
 
         self.maxtheta = max(0, math.degrees(round(theta_low, 4)) - 0.5)

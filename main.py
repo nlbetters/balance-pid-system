@@ -66,11 +66,11 @@ STUCK_BOOST_MAX = 2.75
 # so we can quickly flip X/Y direction if the platform pushes the ball away from center.
 DEBUG_DIRECTION_TEST = True
 
-# Loop/debug tuning. Vision debug is useful for setup, but it slows the loop down.
-CAMERA_HZ = 120
+# Loop/debug tuning. Keep vision debug off during balancing because display rendering slows the response.
+CAMERA_HZ = 60
 DEBUG_CONTROL = True
 DEBUG_INTERVAL_SECONDS = 0.2
-DEBUG_VISION = True
+DEBUG_VISION = False
 
 
 # Initialize objects
