@@ -28,12 +28,12 @@ WHITE_LAB_RANGE = (np.array([155, 105, 105]), np.array([255, 165, 165]))
 
 # Platform ROI. Use almost the full frame so the ball is not accidentally masked out.
 # A smaller ROI can be used later once the camera is mounted permanently.
-PLATFORM_MASK_RADIUS = 95
+PLATFORM_MASK_RADIUS = 130
 
 # Ball size limits in the 200 x 150 tracking image.
-MIN_CONTOUR_AREA = 25
+MIN_CONTOUR_AREA = 120
 MAX_CONTOUR_AREA = 7000
-MIN_RADIUS = 5
+MIN_RADIUS = 9
 MAX_RADIUS = 45
 EDGE_MARGIN = 2
 
@@ -43,25 +43,34 @@ MIN_FILL_RATIO = 0.35
 MAX_FILL_RATIO = 1.35
 MIN_ASPECT_RATIO = 0.55
 MAX_ASPECT_RATIO = 1.55
-MIN_CONFIDENCE = 0.50
-MIN_COLOR_CONFIDENCE = 0.18
-MIN_BRIGHTNESS_SCORE = 0.22
+MIN_CONFIDENCE = 0.62
+MIN_INITIAL_CONFIDENCE = 0.72
+MIN_COLOR_CONFIDENCE = 0.32
+MIN_BRIGHTNESS_SCORE = 0.30
 MIN_SATURATION_SCORE = 0.0
 
 # Hough circle fallback. This helps when a white/gold ball blends into the background
 # and color thresholding only creates weak or broken contours.
 USE_HOUGH_FALLBACK = True
+RUN_HOUGH_ONLY_IF_NO_MASK_CANDIDATE = True
 HOUGH_DP = 1.2
 HOUGH_MIN_DIST = 28
 HOUGH_PARAM1 = 80
-HOUGH_PARAM2 = 16
-HOUGH_MIN_RADIUS = 5
+HOUGH_PARAM2 = 18
+HOUGH_MIN_RADIUS = MIN_RADIUS
 HOUGH_MAX_RADIUS = 45
+MIN_HOUGH_COLOR_CONFIDENCE = 0.35
+MIN_HOUGH_BRIGHTNESS_SCORE = 0.40
 
 # Tracking checks and PID-friendly smoothing.
-MAX_FRAME_JUMP = 70
+MAX_FRAME_JUMP = 90
 SMOOTHING_ALPHA = 0.35
 MAX_MISSED_FRAMES = 4
+
+# A new object must look like the ball for a couple frames before the control loop trusts it.
+# This prevents the tracker from immediately choosing a random circle when the ball is gone.
+REQUIRED_INITIAL_HITS = 2
+INITIAL_MATCH_DISTANCE = 18
 
 # Mask cleanup.
 USE_GAUSSIAN_BLUR = True
@@ -108,6 +117,8 @@ class Camera:
         self.ball_found = False
         self.confidence = 0.0
         self.missed_frames = 0
+        self.pending_center = None
+        self.pending_hits = 0
 
         self._kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE, (MORPH_KERNEL_SIZE, MORPH_KERNEL_SIZE)
@@ -166,6 +177,35 @@ class Camera:
         self._update_timing()
 
         if detection is not None:
+            if self.last_valid_position is None:
+                if self.pending_center is not None:
+                    jump = np.hypot(
+                        detection.center[0] - self.pending_center[0],
+                        detection.center[1] - self.pending_center[1],
+                    )
+                    if jump <= INITIAL_MATCH_DISTANCE:
+                        self.pending_hits += 1
+                    else:
+                        self.pending_hits = 1
+                else:
+                    self.pending_hits = 1
+
+                self.pending_center = detection.center
+
+                if detection.confidence < MIN_INITIAL_CONFIDENCE or self.pending_hits < REQUIRED_INITIAL_HITS:
+                    self.ball_found = False
+                    self.confidence = 0.0
+                    self.missed_frames += 1
+                    self.last_center = self.frame_center
+                    self.last_offset = (0, 0)
+                    if self.missed_frames > MAX_MISSED_FRAMES:
+                        self.last_valid_position = None
+                    if self.debug:
+                        self._build_debug_frame(image, mask, None, debug_detections)
+                    return self.last_center
+
+            self.pending_center = None
+            self.pending_hits = 0
             smoothed = self._smooth_position(detection.center)
             self.last_center = smoothed
             self.last_valid_position = smoothed
@@ -177,12 +217,15 @@ class Camera:
             self.ball_found = False
             self.confidence = 0.0
             self.missed_frames += 1
-            # Keep the last valid position briefly so the PID loop never sees noise.
+            self.pending_center = None
+            self.pending_hits = 0
+            self.last_center = self.frame_center
+            self.last_offset = (0, 0)
             if self.missed_frames > MAX_MISSED_FRAMES:
                 self.last_valid_position = None
 
         if self.debug:
-            self._build_debug_frame(image, mask, detection, debug_detections)
+            self._build_debug_frame(image, mask, detection if self.ball_found else None, debug_detections)
         return self.last_center
 
     def _apply_clahe(self, image):
@@ -262,7 +305,10 @@ class Camera:
             if best is None or detection.confidence > best.confidence:
                 best = detection
 
-        if USE_HOUGH_FALLBACK:
+        should_run_hough = USE_HOUGH_FALLBACK and (
+            best is None or not RUN_HOUGH_ONLY_IF_NO_MASK_CANDIDATE
+        )
+        if should_run_hough:
             for detection in self._hough_detections(source, image.shape, profile_masks):
                 if self.debug:
                     debug_detections.append(detection)
@@ -272,8 +318,12 @@ class Camera:
                 if best is None or detection.confidence > best.confidence:
                     best = detection
 
-        if best is not None and best.confidence >= MIN_CONFIDENCE:
-            return best, mask, debug_detections
+        if best is not None:
+            required_confidence = MIN_CONFIDENCE
+            if self.last_valid_position is None:
+                required_confidence = MIN_INITIAL_CONFIDENCE
+            if best.confidence >= required_confidence:
+                return best, mask, debug_detections
         return None, mask, debug_detections
 
     def _score_contour(self, contour, image_shape, mask, profile_masks, image):
@@ -372,6 +422,7 @@ class Camera:
 
     def _hough_detections(self, image, image_shape, profile_masks):
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        gray = cv2.bitwise_and(gray, gray, mask=self._platform_mask)
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
         circles = cv2.HoughCircles(
             gray,
@@ -449,9 +500,9 @@ class Camera:
             jump = np.hypot(center[0] - self.last_valid_position[0], center[1] - self.last_valid_position[1])
             if jump > MAX_FRAME_JUMP:
                 return result("hough_jump")
-        if color_confidence < MIN_COLOR_CONFIDENCE and brightness_score < 0.45:
+        if color_confidence < MIN_HOUGH_COLOR_CONFIDENCE:
             return result("hough_color")
-        if brightness_score < MIN_BRIGHTNESS_SCORE:
+        if brightness_score < MIN_HOUGH_BRIGHTNESS_SCORE:
             return result("hough_dark")
         if confidence < MIN_CONFIDENCE:
             return result("hough_confidence")
@@ -578,7 +629,10 @@ class Camera:
             cv2.drawContours(debug, [item.contour], -1, color, 1)
             if item.radius > 0:
                 cv2.circle(debug, item.center, int(item.radius), color, 1)
-            label = f"{item.rejection_reason} {item.confidence:.2f} {item.color_name}"
+            if accepted:
+                label = f"BALL {item.confidence:.2f} {item.color_name}"
+            else:
+                label = f"reject {item.rejection_reason} {item.confidence:.2f}"
             cv2.putText(
                 debug,
                 label,

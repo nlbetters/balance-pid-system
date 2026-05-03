@@ -37,7 +37,7 @@ INVERT_Y_RESPONSE = True
 CAMERA_HZ = 120
 DEBUG_CONTROL = True
 DEBUG_INTERVAL_SECONDS = 0.2
-DEBUG_VISION = False
+DEBUG_VISION = True
 
 
 # Initialize objects
@@ -54,13 +54,14 @@ pid_was_reset_for_lost_ball = False
 # Initialize ball position at the camera target.
 x, y = cam.frame_center
 
-def capture():
 
+def capture():
     global latest_frame
     while running:
         frame = cam.take_picture()
         with lock:
-            latest_frame = frame 
+            latest_frame = frame
+
 
 def process():
     hz = CAMERA_HZ
@@ -68,9 +69,9 @@ def process():
     while running:
         with lock:
             if latest_frame is None:
-                continue 
+                continue
             frame_copy = latest_frame.copy()
-        
+
         loop_start = time.perf_counter()
         center, offset, found, confidence, fps, last_valid = cam.coordinate_with_offset(frame_copy)
         x_t, y_t = cam.frame_center  # Target position
@@ -79,12 +80,24 @@ def process():
             x, y = center
             pid_was_reset_for_lost_ball = False
         else:
-            # If the ball is lost, do not chase a stale camera position.
-            # Go neutral and clear old PID memory until the tracker finds the ball again.
-            x, y = x_t, y_t
+            # If the ball is lost, reset PID and return the platform to neutral.
+            # This avoids chasing noise or stale camera positions.
             if not pid_was_reset_for_lost_ball:
                 PID.reset()
+                robot.Goto_N_time_spherical(0.0, 0.0, CONTROL_HEIGHT)
                 pid_was_reset_for_lost_ball = True
+                if DEBUG_CONTROL:
+                    print("ball lost: returning servos to neutral")
+
+            if DEBUG_VISION:
+                cam.display_debug()
+
+            elapsed = time.perf_counter() - loop_start
+            sleep_time = (1 / hz) - elapsed
+            if sleep_time > 0:
+                #print(sleep_time)
+                time.sleep(sleep_time)
+            continue
 
         update_robot_pos(robot, model, PID, x_t, y_t, x, y)
         if DEBUG_VISION:
@@ -96,13 +109,16 @@ def process():
             #print(sleep_time)
             time.sleep(sleep_time)
 
-def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, x, y): #x_t, y_t: target position, x, y: current position, t: duration 
 
+def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, x, y):
+    # x_t, y_t: target position, x, y: current position
     global last_debug_time
     error_pixels = math.hypot(x - x_t, y - y_t)
+
     # Camera axes are swapped here on purpose because of the mounted camera direction.
     # Recheck this if the platform tilts on the wrong axis.
     theta, phi = pidcontroller.pid((y_t, x_t), (y, x))
+
     command_x = math.cos(math.radians(phi)) * theta
     command_y = math.sin(math.radians(phi)) * theta
     if INVERT_X_RESPONSE:
@@ -130,7 +146,6 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
         )
 
 
-
 def pid_loop():
     hz = 30  # PID frequency
     while running:
@@ -142,7 +157,8 @@ def pid_loop():
         if sleep_time > 0:
             #print(sleep_time)
             time.sleep(sleep_time)
-            
+
+
 # Move servos to the neutral position before starting the control loop.
 robot.initialize()
 
