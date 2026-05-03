@@ -43,15 +43,16 @@ MIN_FILL_RATIO = 0.35
 MAX_FILL_RATIO = 1.35
 MIN_ASPECT_RATIO = 0.55
 MAX_ASPECT_RATIO = 1.55
-MIN_CONFIDENCE = 0.62
-MIN_INITIAL_CONFIDENCE = 0.72
-MIN_COLOR_CONFIDENCE = 0.32
-MIN_BRIGHTNESS_SCORE = 0.30
+MIN_CONFIDENCE = 0.68
+MIN_INITIAL_CONFIDENCE = 0.82
+MIN_COLOR_CONFIDENCE = 0.42
+MIN_BRIGHTNESS_SCORE = 0.32
 MIN_SATURATION_SCORE = 0.0
 
-# Hough circle fallback. This helps when a white/gold ball blends into the background
-# and color thresholding only creates weak or broken contours.
-USE_HOUGH_FALLBACK = True
+#
+# Hough is useful for testing, but it sees platform rings, screws, and shadows as circles.
+# Keep it off during real balancing so the tracker only trusts color-mask ball candidates.
+USE_HOUGH_FALLBACK = False
 RUN_HOUGH_ONLY_IF_NO_MASK_CANDIDATE = True
 HOUGH_DP = 1.2
 HOUGH_MIN_DIST = 28
@@ -69,8 +70,8 @@ MAX_MISSED_FRAMES = 4
 
 # A new object must look like the ball for a couple frames before the control loop trusts it.
 # This prevents the tracker from immediately choosing a random circle when the ball is gone.
-REQUIRED_INITIAL_HITS = 2
-INITIAL_MATCH_DISTANCE = 18
+REQUIRED_INITIAL_HITS = 3
+INITIAL_MATCH_DISTANCE = 14
 
 # Mask cleanup.
 USE_GAUSSIAN_BLUR = True
@@ -626,6 +627,8 @@ class Camera:
         for item in debug_detections:
             accepted = item.rejection_reason == "accepted"
             color = (0, 255, 0) if accepted else (255, 0, 0)
+            if not accepted and not self.debug:
+                continue
             cv2.drawContours(debug, [item.contour], -1, color, 1)
             if item.radius > 0:
                 cv2.circle(debug, item.center, int(item.radius), color, 1)
