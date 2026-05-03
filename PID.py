@@ -5,6 +5,9 @@ MIN_DT = 0.001
 MAX_DT = 0.05
 INTEGRAL_LIMIT = 250.0
 DERIVATIVE_LIMIT = 5000.0
+OUTPUT_LIMIT = 4.0
+OUTPUT_RATE_LIMIT = 1.2
+ERROR_DEADBAND = 2.0
 
 class PIDcontroller:
     def __init__(self, kp, ki, kd, alpha, beta, max_theta, conversion="linear"): #"linear" or "tanh"
@@ -42,9 +45,16 @@ class PIDcontroller:
             dt = new_time - self.last_time
             dt = max(MIN_DT, min(dt, MAX_DT))
 
-        #errors
+        # errors
         err_x = current[0] - target[0]
         err_y = current[1] - target[1]
+
+        # Ignore tiny camera jitter around the target.
+        if abs(err_x) < ERROR_DEADBAND:
+            err_x = 0.0
+        if abs(err_y) < ERROR_DEADBAND:
+            err_y = 0.0
+
         self.sum_err_x += err_x * dt
         self.sum_err_y += err_y * dt
         self.sum_err_x = max(-INTEGRAL_LIMIT, min(self.sum_err_x, INTEGRAL_LIMIT))
@@ -64,6 +74,18 @@ class PIDcontroller:
         pid_y = self.kp * err_y + self.ki * self.sum_err_y + self.kd * d_err_y
         filtered_x = self.alpha * pid_x + (1 - self.alpha) * self.prev_out_x
         filtered_y = self.alpha * pid_y + (1 - self.alpha) * self.prev_out_y
+
+        # Limit controller output so one noisy frame cannot command a hard tilt.
+        filtered_x = max(-OUTPUT_LIMIT, min(filtered_x, OUTPUT_LIMIT))
+        filtered_y = max(-OUTPUT_LIMIT, min(filtered_y, OUTPUT_LIMIT))
+
+        # Limit output change per frame for smoother servo motion.
+        dx = filtered_x - self.prev_out_x
+        dy = filtered_y - self.prev_out_y
+        dx = max(-OUTPUT_RATE_LIMIT, min(dx, OUTPUT_RATE_LIMIT))
+        dy = max(-OUTPUT_RATE_LIMIT, min(dy, OUTPUT_RATE_LIMIT))
+        filtered_x = self.prev_out_x + dx
+        filtered_y = self.prev_out_y + dy
         
         #Convert to spherical coordinates
         phi = math.degrees(math.atan2(filtered_y, filtered_x))
@@ -83,7 +105,7 @@ class PIDcontroller:
         self.last_time = new_time
         self.has_previous_error = True
 
-        return theta, phi #in degrees
+        return theta, phi # in degrees
 
     def reset(self):
         self.prev_out_x = 0.0

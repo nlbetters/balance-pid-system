@@ -14,24 +14,32 @@ latest_frame = np.zeros((150, 200, 3), dtype=np.uint8)
 lock = threading.Lock()
 running = True
 
-kp = 0.06
-ki = 0.005
-kd = 0.015
+#
+# Start mild for direction testing. Increase kp only after the platform moves the ball
+# toward the yellow center target instead of away from it.
+kp = 0.04
+ki = 0.0
+kd = 0.01
 
 alpha = 0.1
 beta = 2.0
 
 
+#
 # Main control tuning. CONTROL_HEIGHT is the platform operating height used by the
 # inverse kinematics. The controller now maps this neutral height to servo angle 45.
 CONTROL_HEIGHT = 9.0
-COMMAND_THETA_GAIN = 2.0
-MAX_COMMAND_THETA = 12.0
+COMMAND_THETA_GAIN = 1.4
+MAX_COMMAND_THETA = 8.0
 MIN_ACTIVE_THETA = 0.2
-PIXEL_DEADBAND = 3.0
+PIXEL_DEADBAND = 4.0
 COMMAND_PHI_OFFSET_DEG = 0.0
 INVERT_X_RESPONSE = True
 INVERT_Y_RESPONSE = True
+
+# Set this True during first tests. It prints the raw ball error and the final tilt command
+# so we can quickly flip X/Y direction if the platform pushes the ball away from center.
+DEBUG_DIRECTION_TEST = True
 
 # Loop/debug tuning. Vision debug is useful for setup, but it slows the loop down.
 CAMERA_HZ = 120
@@ -114,6 +122,8 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
     # x_t, y_t: target position, x, y: current position
     global last_debug_time
     error_pixels = math.hypot(x - x_t, y - y_t)
+    raw_error_x = x - x_t
+    raw_error_y = y - y_t
 
     # Camera axes are swapped here on purpose because of the mounted camera direction.
     # Recheck this if the platform tilts on the wrong axis.
@@ -139,11 +149,19 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
     now = time.perf_counter()
     if DEBUG_CONTROL and now - last_debug_time >= DEBUG_INTERVAL_SECONDS:
         last_debug_time = now
-        print(
-            f"ball=({x:.1f},{y:.1f}) target=({x_t:.1f},{y_t:.1f}) "
-            f"err={error_pixels:.1f} theta={theta:.2f} phi={phi:.1f} "
-            f"servos={[round(a, 1) for a in robotcontroller.get_motor_angles()]}"
-        )
+        if DEBUG_DIRECTION_TEST:
+            print(
+                f"ball=({x:.1f},{y:.1f}) target=({x_t:.1f},{y_t:.1f}) "
+                f"err_px=({raw_error_x:.1f},{raw_error_y:.1f}) mag={error_pixels:.1f} "
+                f"cmd_xy=({command_x:.2f},{command_y:.2f}) theta={theta:.2f} phi={phi:.1f} "
+                f"servos={[round(a, 1) for a in robotcontroller.get_motor_angles()]}"
+            )
+        else:
+            print(
+                f"ball=({x:.1f},{y:.1f}) target=({x_t:.1f},{y_t:.1f}) "
+                f"err={error_pixels:.1f} theta={theta:.2f} phi={phi:.1f} "
+                f"servos={[round(a, 1) for a in robotcontroller.get_motor_angles()]}"
+            )
 
 
 def pid_loop():
