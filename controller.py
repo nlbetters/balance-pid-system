@@ -24,7 +24,19 @@ SERVO_DIRECTION_PIVOT = DEFAULT_SERVO_ANGLE
 # Servo pair layout:
 # channel 0 is opposite channel 8, and channel 4 is opposite channel 12.
 # Leave SERVO_DIRECTIONS as [1, 1, 1, 1] unless a physical servo is mounted backward.
+
 MAX_SERVO_STEP_PER_COMMAND = 6.0
+
+# Hardware compensation for the left/right axis.
+# In the camera view, servo 4 and servo 12 form the left/right pair.
+# Servo 4 reaches its high side by moving toward angle 0, while servo 12
+# needs extra downward movement for this correction because of the hardware setup.
+ENABLE_SERVO4_SIDE_COMPENSATION = True
+SERVO4_HIGH_LIMIT = 0.0
+SERVO12_DOWN_EXTRA_GAIN = 0.65
+SERVO12_DOWN_EXTRA_MAX = 18.0
+SERVO4_SIDE_PHI_CENTER = 270.0
+SERVO4_SIDE_PHI_WINDOW = 55.0
 
 def clamp(value, lower=MIN_SERVO_ANGLE, upper=MAX_SERVO_ANGLE):
     return max(lower, min(value, upper))
@@ -65,6 +77,33 @@ def servo_angles_from_kinematics(robot):
         DEFAULT_SERVO_ANGLE + direction * (math.degrees(robot.theta4) - neutral_theta)
     ]
     return [clamp(angle) for angle in raw_angles]
+
+
+# --- Servo 4/12 left/right axis compensation helpers ---
+
+def angle_distance_degrees(a, b):
+    return abs((a - b + 180.0) % 360.0 - 180.0)
+
+
+def is_servo4_side_command(phi):
+    return angle_distance_degrees(phi % 360.0, SERVO4_SIDE_PHI_CENTER) <= SERVO4_SIDE_PHI_WINDOW
+
+
+def apply_servo4_side_compensation(target_angles, phi, theta):
+    if not ENABLE_SERVO4_SIDE_COMPENSATION or not is_servo4_side_command(phi):
+        return target_angles
+
+    compensated = list(target_angles)
+    extra = min(SERVO12_DOWN_EXTRA_MAX, max(0.0, theta * SERVO12_DOWN_EXTRA_GAIN))
+
+    # Servo order is [0, 4, 8, 12]. Servo 4 is index 1, servo 12 is index 3.
+    # Servo 4 can only raise toward angle 0, so push it toward that limit.
+    compensated[1] = max(SERVO4_HIGH_LIMIT, compensated[1] - extra)
+
+    # Servo 12 needs stronger downward movement on this axis.
+    compensated[3] = compensated[3] + extra
+
+    return [clamp(angle) for angle in compensated]
 
 class RobotController:
     SERVO_CHANNELS = [0, 4, 8, 12]
@@ -185,9 +224,10 @@ class RobotController:
     def Goto_N_time_spherical(self, theta, phi, h):
         self.robot.solve_inverse_kinematics_spherical(theta, phi, h)
         target_angles = servo_angles_from_kinematics(self.robot)
+        target_angles = apply_servo4_side_compensation(target_angles, phi, theta)
         self.set_motor_angles(*target_angles, rate_limit=True)
 
-    def return_to_neutral(self, h=None, rate_limit=True):
+    def return_to_neutral(self, h=None, rate_limit=True): #comment
         if h is None:
             h = self.robot.h
         self.robot.solve_inverse_kinematics_spherical(0.0, 0.0, h)
