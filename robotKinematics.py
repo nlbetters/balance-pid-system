@@ -142,23 +142,43 @@ class RobotKinematics:
         self.h = h
         self.max_theta(h)
 
-        # Do not clamp theta to self.maxtheta here while tuning the real robot.
-        # main.py already applies the software tilt limit, and this extra clamp was
-        # preventing the physical robot from matching the larger motion seen in app.py.
-        requested_theta = theta
+        # Try the requested tilt first. If that geometry is unreachable, step down
+        # until we find the largest tilt angle the kinematics can solve.
+        requested_theta = max(0.0, float(theta))
+        phi = float(phi)
+        last_error = None
 
-        a = math.sin(math.radians(requested_theta)) * math.cos(math.radians(phi))
-        b = math.sin(math.radians(requested_theta)) * math.sin(math.radians(phi))
-        c = math.cos(math.radians(requested_theta))
+        for attempt_theta in self._theta_attempts(requested_theta):
+            a = math.sin(math.radians(attempt_theta)) * math.cos(math.radians(phi))
+            b = math.sin(math.radians(attempt_theta)) * math.sin(math.radians(phi))
+            c = math.cos(math.radians(attempt_theta))
 
-        try:
-            self.solve_inverse_kinematics_vector(a, b, c, h)
-        except Exception as e:
-            print(a, b, c, h, requested_theta, phi)
-            pass
+            try:
+                self.solve_inverse_kinematics_vector(a, b, c, h)
+                return
+            except Exception as e:
+                last_error = e
+
+        # If even neutral fails, keep the previous valid angles and print a clear warning.
+        print(
+            "IK failed for requested command:",
+            f"theta={requested_theta:.2f}",
+            f"phi={phi:.2f}",
+            f"h={h:.2f}",
+            f"error={last_error}",
+        )
+
+    def _theta_attempts(self, requested_theta):
+        # Always include the requested angle first, then step down in small increments.
+        # This prevents one unreachable high command from freezing the motors.
+        yield requested_theta
+        theta = min(requested_theta, 40.0)
+        while theta > 0.0:
+            theta -= 1.0
+            yield max(theta, 0.0)
 
     def max_theta(self, h, tol=1e-3):
-        theta_low, theta_high = 0.0, math.radians(20)
+        theta_low, theta_high = 0.0, math.radians(20) # please work
 
         def valid(theta):
             c = math.cos(theta)
