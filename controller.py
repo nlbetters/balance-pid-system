@@ -21,6 +21,11 @@ SERVO_OFFSETS = [0, 0, 0, 0]
 SERVO_DIRECTIONS = [1, 1, 1, 1]
 SERVO_DIRECTION_PIVOT = DEFAULT_SERVO_ANGLE
 
+# Servo pair layout:
+# channel 0 is opposite channel 8, and channel 4 is opposite channel 12.
+# Leave SERVO_DIRECTIONS as [1, 1, 1, 1] unless a physical servo is mounted backward.
+MAX_SERVO_STEP_PER_COMMAND = 2.0
+
 def clamp(value, lower=MIN_SERVO_ANGLE, upper=MAX_SERVO_ANGLE):
     return max(lower, min(value, upper))
 
@@ -74,6 +79,7 @@ class RobotController:
         self.s2 = self.Controller.servo[self.servo_channels[1]]
         self.s3 = self.Controller.servo[self.servo_channels[2]]
         self.s4 = self.Controller.servo[self.servo_channels[3]]
+        self.last_commanded_angles = [DEFAULT_SERVO_ANGLE] * 4
 
         # Configure servos
         for s in (self.s1, self.s2, self.s3, self.s4):
@@ -85,17 +91,29 @@ class RobotController:
     def initialize(self):
         print("Initializing ...")
         neutral_angles = [DEFAULT_SERVO_ANGLE] * 4
-        self.set_motor_angles(*neutral_angles)
+        self.last_commanded_angles = neutral_angles[:]
+        self.set_motor_angles(*neutral_angles, rate_limit=False)
         self.interpolate_time(neutral_angles, duration=0.25)
         time.sleep(1)
         print("Initialized!")
     
-    def set_motor_angles(self, theta1, theta2, theta3, theta4=None):
-        self.s1.angle = apply_servo_calibration(theta1, 0)
-        self.s2.angle = apply_servo_calibration(theta2, 1)
-        self.s3.angle = apply_servo_calibration(theta3, 2)
-        if theta4 is not None:
-            self.s4.angle = apply_servo_calibration(theta4, 3)
+    def set_motor_angles(self, theta1, theta2, theta3, theta4=None, rate_limit=True):
+        commanded = [theta1, theta2, theta3, self.last_commanded_angles[3] if theta4 is None else theta4]
+        commanded = [clamp(angle) for angle in commanded]
+
+        if rate_limit:
+            limited = []
+            for previous, target in zip(self.last_commanded_angles, commanded):
+                delta = target - previous
+                delta = max(-MAX_SERVO_STEP_PER_COMMAND, min(delta, MAX_SERVO_STEP_PER_COMMAND))
+                limited.append(previous + delta)
+            commanded = limited
+
+        self.last_commanded_angles = commanded[:]
+        self.s1.angle = apply_servo_calibration(commanded[0], 0)
+        self.s2.angle = apply_servo_calibration(commanded[1], 1)
+        self.s3.angle = apply_servo_calibration(commanded[2], 2)
+        self.s4.angle = apply_servo_calibration(commanded[3], 3)
 
     def get_motor_angles(self):
         return [
@@ -122,7 +140,7 @@ class RobotController:
                 c + (t_angle - c) * min(t / d, 1) if d > 0 else t_angle
                 for c, t_angle, d in zip(current_angles, target_angles, individual_durations)
             ]
-            self.set_motor_angles(*angles)
+            self.set_motor_angles(*angles, rate_limit=False)
             time.sleep(max_duration / steps)
 
     def interpolate_speed(self, target_angles, speed=30, individual_speeds=None):
@@ -146,7 +164,7 @@ class RobotController:
                 c + (t_angle - c) * min(t / d, 1) if d > 0 else t_angle
                 for c, t_angle, d in zip(current_angles, target_angles, durations)
             ]
-            self.set_motor_angles(*angles)
+            self.set_motor_angles(*angles, rate_limit=False)
             time.sleep(max_duration / steps)
 
     def Goto_time_spherical(self, theta, phi, h, t=0.5):
@@ -162,12 +180,19 @@ class RobotController:
     def Goto_N_time_vector(self, a, b, c, h):
         self.robot.solve_inverse_kinematics_vector(a, b, c, h)
         target_angles = servo_angles_from_kinematics(self.robot)
-        self.set_motor_angles(*target_angles)
+        self.set_motor_angles(*target_angles, rate_limit=True)
     
     def Goto_N_time_spherical(self, theta, phi, h):
         self.robot.solve_inverse_kinematics_spherical(theta, phi, h)
         target_angles = servo_angles_from_kinematics(self.robot)
-        self.set_motor_angles(*target_angles)
+        self.set_motor_angles(*target_angles, rate_limit=True)
+
+    def return_to_neutral(self, h=None, rate_limit=True):
+        if h is None:
+            h = self.robot.h
+        self.robot.solve_inverse_kinematics_spherical(0.0, 0.0, h)
+        target_angles = servo_angles_from_kinematics(self.robot)
+        self.set_motor_angles(*target_angles, rate_limit=rate_limit)
 
     def Dance1(self):
         self.Goto_time_vector(0.258819045103, 0, 0.965925826289, 8)
