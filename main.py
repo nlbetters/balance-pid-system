@@ -26,7 +26,7 @@ beta = 2.0
 
 
 #
-# Main control tuning. CONTROL_HEIGHT is the platform operating height used by the
+# Main control tuning. CONTROL_HEIGHT is the platform operating height used by the 
 # inverse kinematics. The controller now maps this neutral height to servo angle 45.
 CONTROL_HEIGHT = 9.0
 COMMAND_THETA_GAIN = 1.9
@@ -86,7 +86,7 @@ DEBUG_DIRECTION_TEST = True
 CAMERA_HZ = 120
 DEBUG_CONTROL = True
 DEBUG_INTERVAL_SECONDS = 0.50
-DEBUG_VISION = False
+DEBUG_VISION = True
 
 
 # Initialize objects
