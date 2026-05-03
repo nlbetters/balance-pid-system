@@ -25,7 +25,7 @@ SERVO_DIRECTION_PIVOT = DEFAULT_SERVO_ANGLE
 # channel 0 is opposite channel 8, and channel 4 is opposite channel 12.
 # Leave SERVO_DIRECTIONS as [1, 1, 1, 1] unless a physical servo is mounted backward.
 
-MAX_SERVO_STEP_PER_COMMAND = 6.0
+MAX_SERVO_STEP_PER_COMMAND = 4.0
 
 # Hardware compensation for the left/right axis.
 # In the camera view, servo 4 and servo 12 form the left/right pair.
@@ -33,10 +33,10 @@ MAX_SERVO_STEP_PER_COMMAND = 6.0
 # needs extra downward movement for this correction because of the hardware setup.
 ENABLE_SERVO4_SIDE_COMPENSATION = True
 SERVO4_HIGH_LIMIT = 0.0
-SERVO12_DOWN_EXTRA_GAIN = 0.65
-SERVO12_DOWN_EXTRA_MAX = 18.0
+SERVO12_DOWN_EXTRA_GAIN = 0.35
+SERVO12_DOWN_EXTRA_MAX = 9.0
 SERVO4_SIDE_PHI_CENTER = 270.0
-SERVO4_SIDE_PHI_WINDOW = 55.0
+SERVO4_SIDE_PHI_WINDOW = 45.0
 
 def clamp(value, lower=MIN_SERVO_ANGLE, upper=MAX_SERVO_ANGLE):
     return max(lower, min(value, upper))
@@ -100,12 +100,12 @@ def apply_servo4_side_compensation(target_angles, phi, theta):
     # Servo 4 can only raise toward angle 0, so push it toward that limit.
     compensated[1] = max(SERVO4_HIGH_LIMIT, compensated[1] - extra)
 
-    # Servo 12 needs stronger downward movement on this axis.
+    # Servo 12 gets a moderate extra downward movement on this axis.
     compensated[3] = compensated[3] + extra
 
     return [clamp(angle) for angle in compensated]
 
-class RobotController:
+class RobotController: # bruh
     SERVO_CHANNELS = [0, 4, 8, 12]
 
     def __init__(self, model, lp=7.125, l1=6.20, l2=4.50, lb=4.00, servo_channels=None):

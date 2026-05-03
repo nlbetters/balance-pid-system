@@ -17,9 +17,9 @@ running = True
 #
 # Start mild for direction testing. Increase kp only after the platform moves the ball
 # toward the yellow center target instead of away from it.
-kp = 0.08
+kp = 0.055
 ki = 0.0
-kd = 0.01
+kd = 0.014
 
 alpha = 0.1
 beta = 2.0
@@ -29,10 +29,10 @@ beta = 2.0
 # Main control tuning. CONTROL_HEIGHT is the platform operating height used by the
 # inverse kinematics. The controller now maps this neutral height to servo angle 45.
 CONTROL_HEIGHT = 9.0
-COMMAND_THETA_GAIN = 5.2
-MAX_COMMAND_THETA = 28.0
-MIN_ACTIVE_THETA = 1.80
-PIXEL_DEADBAND = 2.5
+COMMAND_THETA_GAIN = 3.8
+MAX_COMMAND_THETA = 22.0
+MIN_ACTIVE_THETA = 1.00
+PIXEL_DEADBAND = 5.0
 COMMAND_PHI_OFFSET_DEG = 0.0
 INVERT_X_RESPONSE = True
 INVERT_Y_RESPONSE = True
@@ -40,8 +40,8 @@ INVERT_Y_RESPONSE = True
 # Direct camera-error control is easier to tune than the polar PID direction while testing.
 # Screen left/right error maps to servo pair 4/12. Screen up/down error maps to servo pair 0/8.
 USE_DIRECT_ERROR_CONTROL = True
-DIRECT_X_TO_LR_GAIN = 0.220
-DIRECT_Y_TO_UD_GAIN = 0.080
+DIRECT_X_TO_LR_GAIN = 0.145
+DIRECT_Y_TO_UD_GAIN = 0.055
 DIRECT_LR_SIGN = -1.0
 DIRECT_UD_SIGN = -1.0
 
@@ -49,26 +49,26 @@ DIRECT_UD_SIGN = -1.0
 # In the camera view, servo motors 4 and 12 are the left/right motors.
 # Because the camera axes are swapped in the PID call below, screen horizontal error
 # mainly shows up as command_y. Boost that whole left/right pair, not just one side.
-LEFT_RIGHT_PAIR_GAIN = 3.00
-UP_DOWN_PAIR_GAIN = 0.95
-LEFT_RIGHT_MIN_THETA = 3.50
-LEFT_RIGHT_ERROR_THRESHOLD = 12.0
+LEFT_RIGHT_PAIR_GAIN = 2.15
+UP_DOWN_PAIR_GAIN = 0.75
+LEFT_RIGHT_MIN_THETA = 1.80
+LEFT_RIGHT_ERROR_THRESHOLD = 16.0
 
 # Corner correction tuning.
 # If the ball is stuck in the bottom-right corner between motors 4 and 8,
 # both the left/right and up/down axes need to respond together instead of forcing
 # a pure left/right tilt.
-CORNER_ERROR_THRESHOLD = 14.0
-BOTTOM_RIGHT_CORNER_GAIN = 1.85
-CORNER_MIN_THETA = 7.50
+CORNER_ERROR_THRESHOLD = 18.0
+BOTTOM_RIGHT_CORNER_GAIN = 1.25
+CORNER_MIN_THETA = 3.50
 
 # Dynamic stuck response.
 # If the ball is far from center and the error is not improving, slowly increase tilt.
 DYNAMIC_TILT_ENABLED = True
-STUCK_ERROR_THRESHOLD = 12.0
-STUCK_IMPROVEMENT_THRESHOLD = 1.0
-STUCK_BOOST_RATE = 0.35
-STUCK_BOOST_MAX = 1.80
+STUCK_ERROR_THRESHOLD = 20.0
+STUCK_IMPROVEMENT_THRESHOLD = 0.75
+STUCK_BOOST_RATE = 0.12
+STUCK_BOOST_MAX = 1.25
 
 # Set this True during first tests. It prints the raw ball error and the final tilt command
 # so we can quickly flip X/Y direction if the platform pushes the ball away from center.
@@ -77,7 +77,7 @@ DEBUG_DIRECTION_TEST = True
 # Loop/debug tuning. Keep vision debug off during balancing because display rendering slows the response.
 CAMERA_HZ = 120
 DEBUG_CONTROL = True
-DEBUG_INTERVAL_SECONDS = 0.35 # comment
+DEBUG_INTERVAL_SECONDS = 0.50
 DEBUG_VISION = True
 
 
@@ -193,7 +193,7 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
     # Screen horizontal error is handled by the left/right servo pair 4/12.
     # Boost left/right correction and calm the up/down pair so the platform does not
     # waste motion oscillating vertically while the ball is stuck on the side.
-    left_right_boost_active = abs(raw_error_x) >= LEFT_RIGHT_ERROR_THRESHOLD
+    left_right_boost_active = abs(raw_error_x) >= LEFT_RIGHT_ERROR_THRESHOLD and abs(raw_error_x) > abs(raw_error_y)
     if bottom_right_corner_active:
         command_y *= LEFT_RIGHT_PAIR_GAIN * BOTTOM_RIGHT_CORNER_GAIN
         command_x *= UP_DOWN_PAIR_GAIN * BOTTOM_RIGHT_CORNER_GAIN
@@ -240,9 +240,9 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
     # robotkinematics.maxtheta can be overly conservative and may cap the tilt too early.
     theta = min(theta, MAX_COMMAND_THETA)
     phi = (math.degrees(math.atan2(command_y, command_x)) + COMMAND_PHI_OFFSET_DEG) % 360
-    if left_right_boost_active and not bottom_right_corner_active and abs(command_y) > 1.5 * abs(command_x):
-        # Force a clean left/right correction only when the ball is off to the side,
-        # not when it is stuck in a corner and needs both axes.
+    if left_right_boost_active and not bottom_right_corner_active and abs(command_y) > 2.5 * abs(command_x):
+        # Force a clean left/right correction only when the ball is very clearly off to the side,
+        # not when it is near center or in a corner and needs a blended correction.
         phi = 90.0 if command_y > 0 else 270.0
 
     robotcontroller.Goto_N_time_spherical(theta, phi, CONTROL_HEIGHT)
