@@ -29,10 +29,10 @@ beta = 2.0
 # Main control tuning. CONTROL_HEIGHT is the platform operating height used by the
 # inverse kinematics. The controller now maps this neutral height to servo angle 45.
 CONTROL_HEIGHT = 9.0
-COMMAND_THETA_GAIN = 7.5
-MAX_COMMAND_THETA = 36.0
-MIN_ACTIVE_THETA = 3.00
-PIXEL_DEADBAND = 1.5
+COMMAND_THETA_GAIN = 5.2
+MAX_COMMAND_THETA = 28.0
+MIN_ACTIVE_THETA = 1.80
+PIXEL_DEADBAND = 2.5
 COMMAND_PHI_OFFSET_DEG = 0.0
 INVERT_X_RESPONSE = True
 INVERT_Y_RESPONSE = True
@@ -40,8 +40,8 @@ INVERT_Y_RESPONSE = True
 # Direct camera-error control is easier to tune than the polar PID direction while testing.
 # Screen left/right error maps to servo pair 4/12. Screen up/down error maps to servo pair 0/8.
 USE_DIRECT_ERROR_CONTROL = True
-DIRECT_X_TO_LR_GAIN = 0.320
-DIRECT_Y_TO_UD_GAIN = 0.110
+DIRECT_X_TO_LR_GAIN = 0.220
+DIRECT_Y_TO_UD_GAIN = 0.080
 DIRECT_LR_SIGN = -1.0
 DIRECT_UD_SIGN = -1.0
 
@@ -49,27 +49,27 @@ DIRECT_UD_SIGN = -1.0
 # In the camera view, servo motors 4 and 12 are the left/right motors.
 # Because the camera axes are swapped in the PID call below, screen horizontal error
 # mainly shows up as command_y. Boost that whole left/right pair, not just one side.
-LEFT_RIGHT_PAIR_GAIN = 4.25
-UP_DOWN_PAIR_GAIN = 0.80
-LEFT_RIGHT_MIN_THETA = 8.00
-LEFT_RIGHT_ERROR_THRESHOLD = 10.0
+LEFT_RIGHT_PAIR_GAIN = 3.00
+UP_DOWN_PAIR_GAIN = 0.70
+LEFT_RIGHT_MIN_THETA = 3.50
+LEFT_RIGHT_ERROR_THRESHOLD = 12.0
 
 # Dynamic stuck response.
 # If the ball is far from center and the error is not improving, slowly increase tilt.
 DYNAMIC_TILT_ENABLED = True
 STUCK_ERROR_THRESHOLD = 12.0
 STUCK_IMPROVEMENT_THRESHOLD = 1.0
-STUCK_BOOST_RATE = 0.85
-STUCK_BOOST_MAX = 2.75
+STUCK_BOOST_RATE = 0.35
+STUCK_BOOST_MAX = 1.80
 
 # Set this True during first tests. It prints the raw ball error and the final tilt command
 # so we can quickly flip X/Y direction if the platform pushes the ball away from center.
 DEBUG_DIRECTION_TEST = True
 
 # Loop/debug tuning. Keep vision debug off during balancing because display rendering slows the response.
-CAMERA_HZ = 60
+CAMERA_HZ = 120
 DEBUG_CONTROL = True
-DEBUG_INTERVAL_SECONDS = 0.2
+DEBUG_INTERVAL_SECONDS = 0.35
 DEBUG_VISION = False
 
 
