@@ -17,9 +17,9 @@ running = True
 #
 # Start mild for direction testing. Increase kp only after the platform moves the ball
 # toward the yellow center target instead of away from it.
-kp = 0.065
+kp = 0.08
 ki = 0.0
-kd = 0.012
+kd = 0.01
 
 alpha = 0.1
 beta = 2.0
@@ -29,21 +29,29 @@ beta = 2.0
 # Main control tuning. CONTROL_HEIGHT is the platform operating height used by the
 # inverse kinematics. The controller now maps this neutral height to servo angle 45.
 CONTROL_HEIGHT = 9.0
-COMMAND_THETA_GAIN = 1.9
-MAX_COMMAND_THETA = 12.0
-MIN_ACTIVE_THETA = 0.35
+COMMAND_THETA_GAIN = 2.3
+MAX_COMMAND_THETA = 15.0
+MIN_ACTIVE_THETA = 0.60
 PIXEL_DEADBAND = 4.0
 COMMAND_PHI_OFFSET_DEG = 0.0
 INVERT_X_RESPONSE = True
 INVERT_Y_RESPONSE = True
 
+# Direct camera-error control is easier to tune than the polar PID direction while testing.
+# Screen left/right error maps to servo pair 4/12. Screen up/down error maps to servo pair 0/8.
+USE_DIRECT_ERROR_CONTROL = True
+DIRECT_X_TO_LR_GAIN = 0.065
+DIRECT_Y_TO_UD_GAIN = 0.045
+DIRECT_LR_SIGN = -1.0
+DIRECT_UD_SIGN = -1.0
+
 # Axis response tuning.
 # In the camera view, servo motors 4 and 12 are the left/right motors.
 # Because the camera axes are swapped in the PID call below, screen horizontal error
 # mainly shows up as command_y. Boost that whole left/right pair, not just one side.
-LEFT_RIGHT_PAIR_GAIN = 2.15
-UP_DOWN_PAIR_GAIN = 0.80
-LEFT_RIGHT_MIN_THETA = 1.10
+LEFT_RIGHT_PAIR_GAIN = 1.55
+UP_DOWN_PAIR_GAIN = 0.90
+LEFT_RIGHT_MIN_THETA = 1.25
 
 # Set this True during first tests. It prints the raw ball error and the final tilt command
 # so we can quickly flip X/Y direction if the platform pushes the ball away from center.
@@ -133,20 +141,27 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
     raw_error_x = x - x_t
     raw_error_y = y - y_t
 
-    # Camera axes are swapped here on purpose because of the mounted camera direction.
-    # Recheck this if the platform tilts on the wrong axis.
-    theta, phi = pidcontroller.pid((y_t, x_t), (y, x))
+    if USE_DIRECT_ERROR_CONTROL:
+        # Direct mapping from camera error to platform command.
+        # raw_error_x > 0 means the ball is right of center in the camera view.
+        # raw_error_y > 0 means the ball is below center in the camera view.
+        command_y = DIRECT_LR_SIGN * raw_error_x * DIRECT_X_TO_LR_GAIN
+        command_x = DIRECT_UD_SIGN * raw_error_y * DIRECT_Y_TO_UD_GAIN
+    else:
+        # Camera axes are swapped here on purpose because of the mounted camera direction.
+        # Recheck this if the platform tilts on the wrong axis.
+        theta, phi = pidcontroller.pid((y_t, x_t), (y, x))
+        command_x = math.cos(math.radians(phi)) * theta
+        command_y = math.sin(math.radians(phi)) * theta
+        if INVERT_X_RESPONSE:
+            command_x *= -1
+        if INVERT_Y_RESPONSE:
+            command_y *= -1
 
-    command_x = math.cos(math.radians(phi)) * theta
-    command_y = math.sin(math.radians(phi)) * theta
-    if INVERT_X_RESPONSE:
-        command_x *= -1
-    if INVERT_Y_RESPONSE:
-        command_y *= -1
-
+    # CHANGE TO TEXT LET ME PUSH TO MAIN
     # Screen horizontal error is handled by the left/right servo pair 4/12.
     # Boost left/right correction and slightly calm the up/down pair to reduce vertical oscillation.
-    left_right_boost_active = abs(command_y) > 0.0
+    left_right_boost_active = abs(command_y) > abs(command_x)
     command_y *= LEFT_RIGHT_PAIR_GAIN
     command_x *= UP_DOWN_PAIR_GAIN
 
