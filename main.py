@@ -29,9 +29,9 @@ beta = 2.0
 # Main control tuning. CONTROL_HEIGHT is the platform operating height used by the
 # inverse kinematics. The controller now maps this neutral height to servo angle 45.
 CONTROL_HEIGHT = 9.0
-COMMAND_THETA_GAIN = 6.0
-MAX_COMMAND_THETA = 30.0
-MIN_ACTIVE_THETA = 2.50
+COMMAND_THETA_GAIN = 7.5
+MAX_COMMAND_THETA = 36.0
+MIN_ACTIVE_THETA = 3.00
 PIXEL_DEADBAND = 1.5
 COMMAND_PHI_OFFSET_DEG = 0.0
 INVERT_X_RESPONSE = True
@@ -40,8 +40,8 @@ INVERT_Y_RESPONSE = True
 # Direct camera-error control is easier to tune than the polar PID direction while testing.
 # Screen left/right error maps to servo pair 4/12. Screen up/down error maps to servo pair 0/8.
 USE_DIRECT_ERROR_CONTROL = True
-DIRECT_X_TO_LR_GAIN = 0.220
-DIRECT_Y_TO_UD_GAIN = 0.155
+DIRECT_X_TO_LR_GAIN = 0.320
+DIRECT_Y_TO_UD_GAIN = 0.110
 DIRECT_LR_SIGN = -1.0
 DIRECT_UD_SIGN = -1.0
 
@@ -49,9 +49,10 @@ DIRECT_UD_SIGN = -1.0
 # In the camera view, servo motors 4 and 12 are the left/right motors.
 # Because the camera axes are swapped in the PID call below, screen horizontal error
 # mainly shows up as command_y. Boost that whole left/right pair, not just one side.
-LEFT_RIGHT_PAIR_GAIN = 3.00
-UP_DOWN_PAIR_GAIN = 1.60
-LEFT_RIGHT_MIN_THETA = 4.00
+LEFT_RIGHT_PAIR_GAIN = 4.25
+UP_DOWN_PAIR_GAIN = 0.80
+LEFT_RIGHT_MIN_THETA = 8.00
+LEFT_RIGHT_ERROR_THRESHOLD = 10.0
 
 # Set this True during first tests. It prints the raw ball error and the final tilt command
 # so we can quickly flip X/Y direction if the platform pushes the ball away from center.
@@ -159,10 +160,15 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
             command_y *= -1
 
     # Screen horizontal error is handled by the left/right servo pair 4/12.
-    # Boost left/right correction and slightly calm the up/down pair to reduce vertical oscillation.
-    left_right_boost_active = abs(command_y) > abs(command_x)
-    command_y *= LEFT_RIGHT_PAIR_GAIN
-    command_x *= UP_DOWN_PAIR_GAIN
+    # Boost left/right correction and calm the up/down pair so the platform does not
+    # waste motion oscillating vertically while the ball is stuck on the side.
+    left_right_boost_active = abs(raw_error_x) >= LEFT_RIGHT_ERROR_THRESHOLD
+    if left_right_boost_active:
+        command_y *= LEFT_RIGHT_PAIR_GAIN
+        command_x *= UP_DOWN_PAIR_GAIN
+    else:
+        command_y *= 1.50 # update
+        command_x *= 1.00
 
     theta = math.hypot(command_x, command_y) * COMMAND_THETA_GAIN
     if error_pixels <= PIXEL_DEADBAND:
@@ -175,6 +181,10 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
     # robotkinematics.maxtheta can be overly conservative and may cap the tilt too early.
     theta = min(theta, MAX_COMMAND_THETA)
     phi = (math.degrees(math.atan2(command_y, command_x)) + COMMAND_PHI_OFFSET_DEG) % 360
+    if left_right_boost_active and abs(command_y) > 1.5 * abs(command_x):
+        # Force a clean left/right correction when the ball is clearly off to the side.
+        # This prevents the command from wasting tilt on the up/down axis.
+        phi = 90.0 if command_y > 0 else 270.0
 
     robotcontroller.Goto_N_time_spherical(theta, phi, CONTROL_HEIGHT)
 
