@@ -17,9 +17,9 @@ running = True
 #
 # Start mild for direction testing. Increase kp only after the platform moves the ball
 # toward the yellow center target instead of away from it.
-kp = 0.04
+kp = 0.065
 ki = 0.0
-kd = 0.01
+kd = 0.012
 
 alpha = 0.1
 beta = 2.0
@@ -29,9 +29,9 @@ beta = 2.0
 # Main control tuning. CONTROL_HEIGHT is the platform operating height used by the
 # inverse kinematics. The controller now maps this neutral height to servo angle 45.
 CONTROL_HEIGHT = 9.0
-COMMAND_THETA_GAIN = 1.4
-MAX_COMMAND_THETA = 8.0
-MIN_ACTIVE_THETA = 0.2
+COMMAND_THETA_GAIN = 1.9
+MAX_COMMAND_THETA = 12.0
+MIN_ACTIVE_THETA = 0.35
 PIXEL_DEADBAND = 4.0
 COMMAND_PHI_OFFSET_DEG = 0.0
 INVERT_X_RESPONSE = True
@@ -40,8 +40,8 @@ INVERT_Y_RESPONSE = True
 # Asymmetric correction tuning.
 # Servo channel 4 is the +Y side of the platform. If the ball gets stuck on that side,
 # boost the +Y command so servo 4/12 push harder in that direction.
-SERVO4_SIDE_Y_GAIN = 1.45
-SERVO4_SIDE_MIN_THETA = 0.55
+SERVO4_SIDE_Y_GAIN = 1.75
+SERVO4_SIDE_MIN_THETA = 0.90
 
 # Set this True during first tests. It prints the raw ball error and the final tilt command
 # so we can quickly flip X/Y direction if the platform pushes the ball away from center.
