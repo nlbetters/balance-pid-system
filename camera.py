@@ -17,8 +17,8 @@ BALL_COLOR_PROFILES = {
     # For real balancing, only track the green ball. White/gold are too close
     # to the platform/background and create false positives.
     "green": [
-        # Slightly wider green range so the darker/shadowed parts of the ball still pass.
-        (np.array([30, 35, 35]), np.array([95, 255, 255])),
+        # Tuned for the green ball. Keep saturation high enough to reject gray/white platform noise.
+        (np.array([35, 55, 35]), np.array([90, 255, 255])),
     ],
 }
 WHITE_LAB_RANGE = (np.array([155, 105, 105]), np.array([255, 165, 165]))
@@ -28,11 +28,13 @@ WHITE_LAB_RANGE = (np.array([155, 105, 105]), np.array([255, 165, 165]))
 PLATFORM_MASK_RADIUS = 92
 
 # Ball size limits in the 200 x 150 tracking image.
-MIN_CONTOUR_AREA = 90
+MIN_CONTOUR_AREA = 160
 MAX_CONTOUR_AREA = 7000
-MIN_RADIUS = 5
+MIN_RADIUS = 7
 MAX_RADIUS = 55
 EDGE_MARGIN = -8
+MIN_BLOB_WIDTH = 10
+MIN_BLOB_HEIGHT = 8
 
 # Shape/mask quality checks.
 MIN_CIRCULARITY = 0.30
@@ -40,18 +42,18 @@ MIN_FILL_RATIO = 0.20
 MAX_FILL_RATIO = 1.45
 MIN_ASPECT_RATIO = 0.45
 MAX_ASPECT_RATIO = 1.75
-MIN_CONFIDENCE = 0.58
-MIN_INITIAL_CONFIDENCE = 0.70
-MIN_COLOR_CONFIDENCE = 0.35
-MIN_BRIGHTNESS_SCORE = 0.18
-MIN_SATURATION_SCORE = 0.10
+MIN_CONFIDENCE = 0.64
+MIN_INITIAL_CONFIDENCE = 0.78
+MIN_COLOR_CONFIDENCE = 0.45
+MIN_BRIGHTNESS_SCORE = 0.16
+MIN_SATURATION_SCORE = 0.18
 
 # Strong green blobs are allowed even when the visible contour is not a perfect circle.
 # This helps when the ball is partly cut off by the frame/ROI but is still clearly green.
 ALLOW_STRONG_COLOR_BLOB = True
-STRONG_COLOR_CONFIDENCE = 0.75
-STRONG_COLOR_MIN_SATURATION = 0.18
-STRONG_COLOR_MIN_AREA = 90
+STRONG_COLOR_CONFIDENCE = 0.82
+STRONG_COLOR_MIN_SATURATION = 0.25
+STRONG_COLOR_MIN_AREA = 160
 
 #
 # Hough is useful for testing, but it sees platform rings, screws, and shadows as circles.
@@ -74,13 +76,13 @@ MAX_MISSED_FRAMES = 4
 
 # A new object must look like the ball for a couple frames before the control loop trusts it.
 # This prevents the tracker from immediately choosing a random circle when the ball is gone.
-REQUIRED_INITIAL_HITS = 3
-INITIAL_MATCH_DISTANCE = 18
+REQUIRED_INITIAL_HITS = 4
+INITIAL_MATCH_DISTANCE = 16
 
 # Mask cleanup.
 USE_GAUSSIAN_BLUR = True
 MORPH_KERNEL_SIZE = 3
-MORPH_OPEN_ITERATIONS = 1
+MORPH_OPEN_ITERATIONS = 2
 MORPH_CLOSE_ITERATIONS = 2
 USE_CLAHE = False
 
@@ -404,12 +406,16 @@ class Camera:
             and saturation_score >= STRONG_COLOR_MIN_SATURATION
             and area >= STRONG_COLOR_MIN_AREA
             and radius <= MAX_RADIUS
+            and w >= MIN_BLOB_WIDTH
+            and h >= MIN_BLOB_HEIGHT
         )
 
         if area < MIN_CONTOUR_AREA or area > MAX_CONTOUR_AREA:
             return result("area")
         if radius < MIN_RADIUS or radius > MAX_RADIUS:
             return result("radius")
+        if w < MIN_BLOB_WIDTH or h < MIN_BLOB_HEIGHT:
+            return result("blob_size")
         if edge_distance < EDGE_MARGIN:
             return result("edge")
         if self.last_valid_position is not None:
