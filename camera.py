@@ -14,21 +14,18 @@ FRAME_DURATION_US = 8333  # about 120 FPS if exposure/light allow it
 # Ball color profiles. Each profile has one or more HSV ranges.
 # These are intentionally broad because the camera exposure changes a lot.
 BALL_COLOR_PROFILES = {
-    "white": [
-        (np.array([0, 0, 115]), np.array([180, 85, 255])),
-    ],
-    "gold": [
-        (np.array([10, 35, 70]), np.array([42, 255, 255])),
-    ],
+    # For real balancing, only track the green ball. White/gold are too close
+    # to the platform/background and create false positives.
     "green": [
-        (np.array([35, 35, 45]), np.array([90, 255, 255])),
+        # Slightly wider green range so the darker/shadowed parts of the ball still pass.
+        (np.array([35, 40, 40]), np.array([90, 255, 255])),
     ],
 }
 WHITE_LAB_RANGE = (np.array([155, 105, 105]), np.array([255, 165, 165]))
 
 # Platform ROI. Use almost the full frame so the ball is not accidentally masked out.
 # A smaller ROI can be used later once the camera is mounted permanently.
-PLATFORM_MASK_RADIUS = 130
+PLATFORM_MASK_RADIUS = 92
 
 # Ball size limits in the 200 x 150 tracking image.
 MIN_CONTOUR_AREA = 120
@@ -38,16 +35,16 @@ MAX_RADIUS = 45
 EDGE_MARGIN = 2
 
 # Shape/mask quality checks.
-MIN_CIRCULARITY = 0.45
-MIN_FILL_RATIO = 0.35
-MAX_FILL_RATIO = 1.35
-MIN_ASPECT_RATIO = 0.55
-MAX_ASPECT_RATIO = 1.55
-MIN_CONFIDENCE = 0.68
-MIN_INITIAL_CONFIDENCE = 0.82
-MIN_COLOR_CONFIDENCE = 0.42
-MIN_BRIGHTNESS_SCORE = 0.32
-MIN_SATURATION_SCORE = 0.0
+MIN_CIRCULARITY = 0.30
+MIN_FILL_RATIO = 0.20
+MAX_FILL_RATIO = 1.45
+MIN_ASPECT_RATIO = 0.45
+MAX_ASPECT_RATIO = 1.75
+MIN_CONFIDENCE = 0.58
+MIN_INITIAL_CONFIDENCE = 0.70
+MIN_COLOR_CONFIDENCE = 0.35
+MIN_BRIGHTNESS_SCORE = 0.18
+MIN_SATURATION_SCORE = 0.10
 
 #
 # Hough is useful for testing, but it sees platform rings, screws, and shadows as circles.
@@ -71,7 +68,7 @@ MAX_MISSED_FRAMES = 4
 # A new object must look like the ball for a couple frames before the control loop trusts it.
 # This prevents the tracker from immediately choosing a random circle when the ball is gone.
 REQUIRED_INITIAL_HITS = 3
-INITIAL_MATCH_DISTANCE = 14
+INITIAL_MATCH_DISTANCE = 18
 
 # Mask cleanup.
 USE_GAUSSIAN_BLUR = True
@@ -247,10 +244,8 @@ class Camera:
             masks[color_name] = profile_mask
             combined = cv2.bitwise_or(combined, profile_mask)
 
-        lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
-        lab_mask = cv2.inRange(lab, WHITE_LAB_RANGE[0], WHITE_LAB_RANGE[1])
-        masks["white"] = cv2.bitwise_or(masks["white"], lab_mask)
-        combined = cv2.bitwise_or(combined, lab_mask)
+        # Do not add the broad white LAB mask during real balancing.
+        # It tends to include the platform, glare, walls, and other light objects.
 
         return combined, masks
 
@@ -516,15 +511,15 @@ class Camera:
         radius_score = 1.0 if MIN_RADIUS <= radius <= MAX_RADIUS else 0.0
         area_score = 1.0 if MIN_CONTOUR_AREA <= area <= MAX_CONTOUR_AREA else 0.0
         return float(
-            0.20 * circularity_score
-            + 0.15 * fill_score
-            + 0.12 * aspect_score
-            + 0.15 * color_confidence
-            + 0.12 * brightness_score
-            + 0.08 * saturation_score
-            + 0.10 * movement_score
-            + 0.04 * radius_score
-            + 0.04 * area_score
+            0.12 * circularity_score
+            + 0.10 * fill_score
+            + 0.08 * aspect_score
+            + 0.38 * color_confidence
+            + 0.08 * brightness_score
+            + 0.16 * saturation_score
+            + 0.03 * movement_score
+            + 0.025 * radius_score
+            + 0.025 * area_score
         )
 
     def _edge_distance(self, center, radius, image_shape):
