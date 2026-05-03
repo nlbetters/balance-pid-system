@@ -15,7 +15,7 @@ lock = threading.Lock()
 running = True
 
 #
-# Start mild for direction testing. Increase kp only after the platform moves the ball
+# Start mild for direction testing. Increase kp only after the platform moves the ball 
 # toward the yellow center target instead of away from it.
 kp = 0.035
 ki = 0.0
@@ -29,19 +29,29 @@ beta = 2.0
 # Main control tuning. CONTROL_HEIGHT is the platform operating height used by the 
 # inverse kinematics. The controller now maps this neutral height to servo angle 45.
 CONTROL_HEIGHT = 9.0
-COMMAND_THETA_GAIN = 1.9
-MAX_COMMAND_THETA = 10.0
+# Main response tuning.
+# Increase COMMAND_THETA_GAIN or MAX_COMMAND_THETA if the platform still feels weak.
+COMMAND_THETA_GAIN = 2.6
+MAX_COMMAND_THETA = 18.0
 MIN_ACTIVE_THETA = 0.20
 PIXEL_DEADBAND = 4.0
 COMMAND_PHI_OFFSET_DEG = 0.0
 INVERT_X_RESPONSE = True
 INVERT_Y_RESPONSE = True
 
+# Nonlinear response tuning.
+# Small errors get a gentle response. Large errors get a much stronger response.
+NONLINEAR_RESPONSE_ENABLED = True
+INNER_RESPONSE_SCALE = 0.35
+OUTER_RESPONSE_SCALE = 1.90
+ERROR_FOR_FULL_RESPONSE = 55.0
+RESPONSE_CURVE_EXPONENT = 1.7
+
 # Direct camera-error control is easier to tune than the polar PID direction while testing.
 # Screen left/right error maps to servo pair 4/12. Screen up/down error maps to servo pair 0/8.
 USE_DIRECT_ERROR_CONTROL = True
-DIRECT_X_TO_LR_GAIN = 0.040
-DIRECT_Y_TO_UD_GAIN = 0.020
+DIRECT_X_TO_LR_GAIN = 0.060
+DIRECT_Y_TO_UD_GAIN = 0.030
 DIRECT_LR_SIGN = -1.0
 DIRECT_UD_SIGN = -1.0
 
@@ -49,17 +59,17 @@ DIRECT_UD_SIGN = -1.0
 # The platform angle controls ball acceleration, so position-only control overshoots.
 # These terms brake the ball based on how fast it is moving in the camera frame.
 VELOCITY_DAMPING_ENABLED = True
-VELOCITY_X_TO_LR_GAIN = 0.0050
-VELOCITY_Y_TO_UD_GAIN = 0.0035
-MAX_VELOCITY_PIXELS_PER_SECOND = 250.0
+VELOCITY_X_TO_LR_GAIN = 0.0040
+VELOCITY_Y_TO_UD_GAIN = 0.0030
+MAX_VELOCITY_PIXELS_PER_SECOND = 300.0
 
 # Axis response tuning.
 # In the camera view, servo motors 4 and 12 are the left/right motors.
 # Because the camera axes are swapped in the PID call below, screen horizontal error
 # mainly shows up as command_y. Boost that whole left/right pair, not just one side.
-LEFT_RIGHT_PAIR_GAIN = 1.00
+LEFT_RIGHT_PAIR_GAIN = 1.15
 UP_DOWN_PAIR_GAIN = 1.00
-LEFT_RIGHT_MIN_THETA = 0.20
+LEFT_RIGHT_MIN_THETA = 0.50
 LEFT_RIGHT_ERROR_THRESHOLD = 999.0
 
 # Corner correction tuning.
@@ -70,13 +80,8 @@ CORNER_ERROR_THRESHOLD = 999.0
 BOTTOM_RIGHT_CORNER_GAIN = 1.00
 CORNER_MIN_THETA = 0.20
 
-# Dynamic stuck response.
-# If the ball is far from center and the error is not improving, slowly increase tilt.
-DYNAMIC_TILT_ENABLED = False
-STUCK_ERROR_THRESHOLD = 20.0
-STUCK_IMPROVEMENT_THRESHOLD = 0.75
-STUCK_BOOST_RATE = 0.12
-STUCK_BOOST_MAX = 1.25
+# Dynamic stuck boost has been removed for stability.
+# The nonlinear response above now handles stronger correction when the ball is far from center.
 
 # Set this True during first tests. It prints the raw ball error and the final tilt command
 # so we can quickly flip X/Y direction if the platform pushes the ball away from center.
@@ -99,9 +104,6 @@ model.max_theta(CONTROL_HEIGHT)
 PID = PIDcontroller(kp, ki, kd, alpha, beta, max_theta=model.maxtheta, conversion="tanh")
 last_debug_time = 0.0
 pid_was_reset_for_lost_ball = False
-stuck_error_previous = None
-stuck_boost = 1.0
-last_stuck_time = None
 prev_ball_x = None
 prev_ball_y = None
 prev_ball_time = None
@@ -139,7 +141,7 @@ def process():
             # This avoids chasing noise or stale camera positions.
             if not pid_was_reset_for_lost_ball:
                 PID.reset()
-                reset_stuck_response()
+                reset_motion_state()
                 robot.Goto_N_time_spherical(0.0, 0.0, CONTROL_HEIGHT)
                 pid_was_reset_for_lost_ball = True
                 if DEBUG_CONTROL:
@@ -166,19 +168,15 @@ def process():
             time.sleep(sleep_time)
 
 
-def reset_stuck_response():
-    global stuck_error_previous, stuck_boost, last_stuck_time
+def reset_motion_state():
     global prev_ball_x, prev_ball_y, prev_ball_time
-    stuck_error_previous = None
-    stuck_boost = 1.0
-    last_stuck_time = None
     prev_ball_x = None
     prev_ball_y = None
     prev_ball_time = None
 
 def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, x, y):
     # x_t, y_t: target position, x, y: current position
-    global last_debug_time, stuck_error_previous, stuck_boost, last_stuck_time
+    global last_debug_time
     global prev_ball_x, prev_ball_y, prev_ball_time
     error_pixels = math.hypot(x - x_t, y - y_t)
     raw_error_x = x - x_t
@@ -217,6 +215,16 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
             raw_error_x >= CORNER_ERROR_THRESHOLD
             and raw_error_y >= CORNER_ERROR_THRESHOLD
         )
+        if NONLINEAR_RESPONSE_ENABLED:
+            normalized_error = min(1.0, error_pixels / ERROR_FOR_FULL_RESPONSE)
+            response_scale = INNER_RESPONSE_SCALE + (
+                OUTER_RESPONSE_SCALE - INNER_RESPONSE_SCALE
+            ) * (normalized_error ** RESPONSE_CURVE_EXPONENT)
+        else:
+            response_scale = 1.0
+
+        command_x *= response_scale
+        command_y *= response_scale
     else:
         # Camera axes are swapped here on purpose because of the mounted camera direction.
         # Recheck this if the platform tilts on the wrong axis.
@@ -228,6 +236,7 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
         if INVERT_Y_RESPONSE:
             command_y *= -1
         bottom_right_corner_active = False
+        response_scale = 1.0
 
     # Screen horizontal error is handled by the left/right servo pair 4/12.
     # Boost left/right correction and calm the up/down pair so the platform does not
@@ -243,28 +252,6 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
         command_y *= 1.50
         command_x *= 1.00
 
-    if DYNAMIC_TILT_ENABLED:
-        now_stuck = time.perf_counter()
-        if last_stuck_time is None:
-            dt_stuck = 0.0
-        else:
-            dt_stuck = max(0.0, min(now_stuck - last_stuck_time, 0.2))
-
-        if stuck_error_previous is None or error_pixels <= PIXEL_DEADBAND:
-            stuck_boost = 1.0
-        else:
-            error_improvement = stuck_error_previous - error_pixels
-            if error_pixels >= STUCK_ERROR_THRESHOLD and error_improvement < STUCK_IMPROVEMENT_THRESHOLD:
-                stuck_boost = min(STUCK_BOOST_MAX, stuck_boost + STUCK_BOOST_RATE * dt_stuck)
-            else:
-                stuck_boost = max(1.0, stuck_boost - STUCK_BOOST_RATE * dt_stuck)
-
-        command_x *= stuck_boost
-        command_y *= stuck_boost
-        stuck_error_previous = error_pixels
-        last_stuck_time = now_stuck
-    else:
-        stuck_boost = 1.0
 
     theta = math.hypot(command_x, command_y) * COMMAND_THETA_GAIN
     if error_pixels <= PIXEL_DEADBAND:
@@ -295,7 +282,7 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
                 f"err_px=({raw_error_x:.1f},{raw_error_y:.1f}) mag={error_pixels:.1f} "
                 f"vel=({velocity_x:.1f},{velocity_y:.1f}) "
                 f"cmd_xy=({command_x:.2f},{command_y:.2f}) theta={theta:.2f} phi={phi:.1f} "
-                f"maxtheta={robotkinematics.maxtheta:.2f} stuckboost={stuck_boost:.2f} "
+                f"maxtheta={robotkinematics.maxtheta:.2f} scale={response_scale:.2f} "
                 f"lrboost={left_right_boost_active} corner={bottom_right_corner_active} "
                 f"servos={[round(a, 1) for a in robotcontroller.get_motor_angles()]}"
             )
