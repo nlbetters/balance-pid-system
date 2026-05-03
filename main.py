@@ -50,9 +50,17 @@ DIRECT_UD_SIGN = -1.0
 # Because the camera axes are swapped in the PID call below, screen horizontal error
 # mainly shows up as command_y. Boost that whole left/right pair, not just one side.
 LEFT_RIGHT_PAIR_GAIN = 3.00
-UP_DOWN_PAIR_GAIN = 0.70
+UP_DOWN_PAIR_GAIN = 0.95
 LEFT_RIGHT_MIN_THETA = 3.50
 LEFT_RIGHT_ERROR_THRESHOLD = 12.0
+
+# Corner correction tuning.
+# If the ball is stuck in the bottom-right corner between motors 4 and 8,
+# both the left/right and up/down axes need to respond together instead of forcing
+# a pure left/right tilt.
+CORNER_ERROR_THRESHOLD = 14.0
+BOTTOM_RIGHT_CORNER_GAIN = 1.85
+CORNER_MIN_THETA = 7.50
 
 # Dynamic stuck response.
 # If the ball is far from center and the error is not improving, slowly increase tilt.
@@ -69,8 +77,8 @@ DEBUG_DIRECTION_TEST = True
 # Loop/debug tuning. Keep vision debug off during balancing because display rendering slows the response.
 CAMERA_HZ = 120
 DEBUG_CONTROL = True
-DEBUG_INTERVAL_SECONDS = 0.35
-DEBUG_VISION = False
+DEBUG_INTERVAL_SECONDS = 0.35 # comment
+DEBUG_VISION = True
 
 
 # Initialize objects
@@ -166,6 +174,10 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
         # raw_error_y > 0 means the ball is below center in the camera view.
         command_y = DIRECT_LR_SIGN * raw_error_x * DIRECT_X_TO_LR_GAIN
         command_x = DIRECT_UD_SIGN * raw_error_y * DIRECT_Y_TO_UD_GAIN
+        bottom_right_corner_active = (
+            raw_error_x >= CORNER_ERROR_THRESHOLD
+            and raw_error_y >= CORNER_ERROR_THRESHOLD
+        )
     else:
         # Camera axes are swapped here on purpose because of the mounted camera direction.
         # Recheck this if the platform tilts on the wrong axis.
@@ -176,12 +188,16 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
             command_x *= -1
         if INVERT_Y_RESPONSE:
             command_y *= -1
+        bottom_right_corner_active = False
 
     # Screen horizontal error is handled by the left/right servo pair 4/12.
     # Boost left/right correction and calm the up/down pair so the platform does not
     # waste motion oscillating vertically while the ball is stuck on the side.
     left_right_boost_active = abs(raw_error_x) >= LEFT_RIGHT_ERROR_THRESHOLD
-    if left_right_boost_active:
+    if bottom_right_corner_active:
+        command_y *= LEFT_RIGHT_PAIR_GAIN * BOTTOM_RIGHT_CORNER_GAIN
+        command_x *= UP_DOWN_PAIR_GAIN * BOTTOM_RIGHT_CORNER_GAIN
+    elif left_right_boost_active:
         command_y *= LEFT_RIGHT_PAIR_GAIN
         command_x *= UP_DOWN_PAIR_GAIN
     else:
@@ -214,6 +230,8 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
     theta = math.hypot(command_x, command_y) * COMMAND_THETA_GAIN
     if error_pixels <= PIXEL_DEADBAND:
         theta = 0.0
+    elif bottom_right_corner_active and theta < CORNER_MIN_THETA:
+        theta = CORNER_MIN_THETA
     elif left_right_boost_active and abs(command_y) > abs(command_x) and theta < LEFT_RIGHT_MIN_THETA:
         theta = LEFT_RIGHT_MIN_THETA
     elif theta < MIN_ACTIVE_THETA:
@@ -222,9 +240,9 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
     # robotkinematics.maxtheta can be overly conservative and may cap the tilt too early.
     theta = min(theta, MAX_COMMAND_THETA)
     phi = (math.degrees(math.atan2(command_y, command_x)) + COMMAND_PHI_OFFSET_DEG) % 360
-    if left_right_boost_active and abs(command_y) > 1.5 * abs(command_x):
-        # Force a clean left/right correction when the ball is clearly off to the side.
-        # This prevents the command from wasting tilt on the up/down axis.
+    if left_right_boost_active and not bottom_right_corner_active and abs(command_y) > 1.5 * abs(command_x):
+        # Force a clean left/right correction only when the ball is off to the side,
+        # not when it is stuck in a corner and needs both axes.
         phi = 90.0 if command_y > 0 else 270.0
 
     robotcontroller.Goto_N_time_spherical(theta, phi, CONTROL_HEIGHT)
@@ -238,7 +256,7 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
                 f"err_px=({raw_error_x:.1f},{raw_error_y:.1f}) mag={error_pixels:.1f} "
                 f"cmd_xy=({command_x:.2f},{command_y:.2f}) theta={theta:.2f} phi={phi:.1f} "
                 f"maxtheta={robotkinematics.maxtheta:.2f} stuckboost={stuck_boost:.2f} "
-                f"lrboost={left_right_boost_active} "
+                f"lrboost={left_right_boost_active} corner={bottom_right_corner_active} "
                 f"servos={[round(a, 1) for a in robotcontroller.get_motor_angles()]}"
             )
         else:
