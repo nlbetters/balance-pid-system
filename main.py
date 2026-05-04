@@ -85,13 +85,13 @@ CORNER_MIN_THETA = 0.20
 
 # Set this True during first tests. It prints the raw ball error and the final tilt command
 # so we can quickly flip X/Y direction if the platform pushes the ball away from center.
-DEBUG_DIRECTION_TEST = True
+DEBUG_DIRECTION_TEST = False
 
 # Loop/debug tuning. Keep vision debug off during balancing because display rendering slows the response.
 CAMERA_HZ = 120
-DEBUG_CONTROL = True
+DEBUG_CONTROL = False
 DEBUG_INTERVAL_SECONDS = 0.50
-DEBUG_VISION = True
+DEBUG_VISION = False
 
 
 # Initialize objects
