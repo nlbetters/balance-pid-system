@@ -14,11 +14,14 @@ latest_frame = np.zeros((150, 200, 3), dtype=np.uint8)
 lock = threading.Lock()
 running = True
 
+latest_ball_pos = None
+ball_pos_lock = threading.Lock()
+
 #
 # Start mild for direction testing. Increase kp only after the platform moves the ball 
 # toward the yellow center target instead of away from it.
 kp = 0.035
-ki = 0.0
+ki = 0.0008
 kd = 0.020
 
 alpha = 0.1
@@ -42,16 +45,16 @@ INVERT_Y_RESPONSE = True
 # Nonlinear response tuning.
 # Small errors get a gentle response. Large errors get a much stronger response.
 NONLINEAR_RESPONSE_ENABLED = True
-INNER_RESPONSE_SCALE = 0.35
-OUTER_RESPONSE_SCALE = 2.60
+INNER_RESPONSE_SCALE = 0.55
+OUTER_RESPONSE_SCALE = 2.20
 ERROR_FOR_FULL_RESPONSE = 42.0
 RESPONSE_CURVE_EXPONENT = 1.45
 
 # Direct camera-error control is easier to tune than the polar PID direction while testing.
 # Screen left/right error maps to servo pair 4/12. Screen up/down error maps to servo pair 0/8.
 USE_DIRECT_ERROR_CONTROL = True
-DIRECT_X_TO_LR_GAIN = 0.080
-DIRECT_Y_TO_UD_GAIN = 0.040
+DIRECT_X_TO_LR_GAIN = 0.055
+DIRECT_Y_TO_UD_GAIN = 0.055
 DIRECT_LR_SIGN = -1.0
 DIRECT_UD_SIGN = -1.0
 
@@ -60,17 +63,18 @@ DIRECT_UD_SIGN = -1.0
 # These terms brake the ball based on how fast it is moving in the camera frame. 
 VELOCITY_DAMPING_ENABLED = True
 VELOCITY_X_TO_LR_GAIN = 0.0035
-VELOCITY_Y_TO_UD_GAIN = 0.0025
+VELOCITY_Y_TO_UD_GAIN = 0.0035
 MAX_VELOCITY_PIXELS_PER_SECOND = 350.0
 
 # Axis response tuning.
 # In the camera view, servo motors 4 and 12 are the left/right motors.
 # Because the camera axes are swapped in the PID call below, screen horizontal error
 # mainly shows up as command_y. Boost that whole left/right pair, not just one side.
-LEFT_RIGHT_PAIR_GAIN = 1.15
+LEFT_RIGHT_PAIR_GAIN = 1.00
 UP_DOWN_PAIR_GAIN = 1.00
 LEFT_RIGHT_MIN_THETA = 0.50
 LEFT_RIGHT_ERROR_THRESHOLD = 999.0
+TRANSITION_BAND = 8.0
 
 # Corner correction tuning.
 # If the ball is stuck in the bottom-right corner between motors 4 and 8,
@@ -85,13 +89,16 @@ CORNER_MIN_THETA = 0.20
 
 # Set this True during first tests. It prints the raw ball error and the final tilt command
 # so we can quickly flip X/Y direction if the platform pushes the ball away from center.
-DEBUG_DIRECTION_TEST = False
+DEBUG_DIRECTION_TEST = True
 
-# Loop/debug tuning. Keep vision debug off during balancing because display rendering slows the response.
-CAMERA_HZ = 120
-DEBUG_CONTROL = False
-DEBUG_INTERVAL_SECONDS = 0.50
-DEBUG_VISION = False
+# Loop/debug tuning.
+# Higher CAMERA_HZ updates the control loop faster without changing the control power.
+# DEBUG_VISION is throttled because drawing the OpenCV window every frame slows the loop down.
+CAMERA_HZ = 180
+DEBUG_CONTROL = True
+DEBUG_INTERVAL_SECONDS = 0.75
+DEBUG_VISION = True
+DEBUG_VISION_EVERY_N_FRAMES = 4
 
 
 # Initialize objects
@@ -122,7 +129,8 @@ def capture():
 
 def process():
     hz = CAMERA_HZ
-    global latest_frame, x, y, pid_was_reset_for_lost_ball
+    global latest_frame, latest_ball_pos
+    debug_frame_counter = 0
     while running:
         with lock:
             if latest_frame is None:
@@ -130,15 +138,43 @@ def process():
             frame_copy = latest_frame.copy()
 
         loop_start = time.perf_counter()
+        debug_frame_counter += 1
         center, offset, found, confidence, fps, last_valid = cam.coordinate_with_offset(frame_copy)
-        x_t, y_t = cam.frame_center  # Target position
+
+        with ball_pos_lock:
+            latest_ball_pos = (center, found)
+
+        if DEBUG_VISION and debug_frame_counter % DEBUG_VISION_EVERY_N_FRAMES == 0:
+            cam.display_debug()
+
+        elapsed = time.perf_counter() - loop_start
+        sleep_time = (1 / hz) - elapsed
+        if sleep_time > 0:
+            #print(sleep_time)
+            time.sleep(sleep_time)
+
+
+def control_loop():
+    hz = 90
+    global latest_ball_pos, x, y, pid_was_reset_for_lost_ball
+    while running:
+        loop_start = time.perf_counter()
+
+        with ball_pos_lock:
+            ball_state = latest_ball_pos
+
+        if ball_state is None:
+            time.sleep(1 / hz)
+            continue
+
+        center, found = ball_state
+        x_t, y_t = cam.frame_center
 
         if found:
             x, y = center
             pid_was_reset_for_lost_ball = False
+            update_robot_pos(robot, model, PID, x_t, y_t, x, y)
         else:
-            # If the ball is lost, reset PID and return the platform to neutral.
-            # This avoids chasing noise or stale camera positions.
             if not pid_was_reset_for_lost_ball:
                 PID.reset()
                 reset_motion_state()
@@ -147,26 +183,10 @@ def process():
                 if DEBUG_CONTROL:
                     print("ball lost: returning servos to neutral")
 
-            if DEBUG_VISION:
-                cam.display_debug()
-
-            elapsed = time.perf_counter() - loop_start
-            sleep_time = (1 / hz) - elapsed
-            if sleep_time > 0:
-                #print(sleep_time)
-                time.sleep(sleep_time)
-            continue
-
-        update_robot_pos(robot, model, PID, x_t, y_t, x, y)
-        if DEBUG_VISION:
-            cam.display_debug()
-        #print(f"Coordinates: {x, y}")
         elapsed = time.perf_counter() - loop_start
         sleep_time = (1 / hz) - elapsed
         if sleep_time > 0:
-            #print(sleep_time)
             time.sleep(sleep_time)
-
 
 def reset_motion_state():
     global prev_ball_x, prev_ball_y, prev_ball_time
@@ -204,13 +224,6 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
         command_y = DIRECT_LR_SIGN * raw_error_x * DIRECT_X_TO_LR_GAIN
         command_x = DIRECT_UD_SIGN * raw_error_y * DIRECT_Y_TO_UD_GAIN
 
-        if VELOCITY_DAMPING_ENABLED:
-            # Brake the ball's velocity so it does not shoot through the center
-            # The damping term must oppose the ball's velocity using the same axis sign
-            # convention as the position term.
-            command_y += DIRECT_LR_SIGN * velocity_x * VELOCITY_X_TO_LR_GAIN
-            command_x += DIRECT_UD_SIGN * velocity_y * VELOCITY_Y_TO_UD_GAIN
-
         bottom_right_corner_active = (
             raw_error_x >= CORNER_ERROR_THRESHOLD
             and raw_error_y >= CORNER_ERROR_THRESHOLD
@@ -225,6 +238,11 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
 
         command_x *= response_scale
         command_y *= response_scale
+
+        if VELOCITY_DAMPING_ENABLED:
+            # Apply damping after nonlinear scaling so braking remains active near center.
+            command_y += DIRECT_LR_SIGN * velocity_x * VELOCITY_X_TO_LR_GAIN
+            command_x += DIRECT_UD_SIGN * velocity_y * VELOCITY_Y_TO_UD_GAIN
     else:
         # Camera axes are swapped here on purpose because of the mounted camera direction.
         # Recheck this if the platform tilts on the wrong axis.
@@ -249,19 +267,21 @@ def update_robot_pos(robotcontroller, robotkinematics, pidcontroller, x_t, y_t, 
         command_y *= LEFT_RIGHT_PAIR_GAIN
         command_x *= UP_DOWN_PAIR_GAIN
     else:
-        command_y *= 1.50
-        command_x *= 1.00
+        command_y *= LEFT_RIGHT_PAIR_GAIN
+        command_x *= UP_DOWN_PAIR_GAIN
 
 
     theta = math.hypot(command_x, command_y) * COMMAND_THETA_GAIN
     if error_pixels <= PIXEL_DEADBAND:
         theta = 0.0
-    elif bottom_right_corner_active and theta < CORNER_MIN_THETA:
-        theta = CORNER_MIN_THETA
-    elif left_right_boost_active and abs(command_y) > abs(command_x) and theta < LEFT_RIGHT_MIN_THETA:
-        theta = LEFT_RIGHT_MIN_THETA
-    elif theta < MIN_ACTIVE_THETA:
-        theta = MIN_ACTIVE_THETA
+    else:
+        ramp = min(1.0, (error_pixels - PIXEL_DEADBAND) / TRANSITION_BAND)
+        min_theta = MIN_ACTIVE_THETA * ramp
+        if bottom_right_corner_active:
+            min_theta = max(min_theta, CORNER_MIN_THETA * ramp)
+        elif left_right_boost_active and abs(command_y) > abs(command_x):
+            min_theta = max(min_theta, LEFT_RIGHT_MIN_THETA * ramp)
+        theta = max(theta, min_theta)
     # Use MAX_COMMAND_THETA as the main software limit while tuning.
     # robotkinematics.maxtheta can be overly conservative and may cap the tilt too early.
     theta = min(theta, MAX_COMMAND_THETA)
@@ -313,6 +333,7 @@ robot.initialize()
 # Start threads
 threading.Thread(target=capture, daemon=True).start()
 threading.Thread(target=process, daemon=True).start()
+threading.Thread(target=control_loop, daemon=True).start()
 time.sleep(2)
 #threading.Thread(target=pid_loop).start()
 

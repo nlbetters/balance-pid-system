@@ -5,6 +5,7 @@ import time
 MIN_DT = 0.001
 MAX_DT = 0.05
 INTEGRAL_LIMIT = 250.0
+INTEGRAL_DECAY = 0.995
 DERIVATIVE_LIMIT = 5000.0
 OUTPUT_LIMIT = 4.0
 OUTPUT_RATE_LIMIT = 1.2
@@ -56,6 +57,10 @@ class PIDcontroller:
         if abs(err_y) < ERROR_DEADBAND:
             err_y = 0.0
 
+        # Decay the integral slightly each update so it can correct drift
+        # without building up too much old error over time.
+        self.sum_err_x *= INTEGRAL_DECAY
+        self.sum_err_y *= INTEGRAL_DECAY
         self.sum_err_x += err_x * dt
         self.sum_err_y += err_y * dt
         self.sum_err_x = max(-INTEGRAL_LIMIT, min(self.sum_err_x, INTEGRAL_LIMIT))

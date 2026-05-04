@@ -1,6 +1,5 @@
 import time
 import math
-import random
 from robotKinematics import RobotKinematics
 
 try:
@@ -14,6 +13,7 @@ except ImportError:
     PCA9685 = None
     ServoKit = None
 
+ # Servo safety/tuning values. Keep these near the top so hardware tuning is easy.
 MIN_SERVO_ANGLE = 0
 MAX_SERVO_ANGLE = 100
 DEFAULT_SERVO_ANGLE = 45
@@ -25,6 +25,7 @@ SERVO_DIRECTION_PIVOT = DEFAULT_SERVO_ANGLE
 # channel 0 is opposite channel 8, and channel 4 is opposite channel 12.
 # Leave SERVO_DIRECTIONS as [1, 1, 1, 1] unless a physical servo is mounted backward.
 
+# Limits how quickly each servo can change per command. Lower = smoother, higher = faster.
 MAX_SERVO_STEP_PER_COMMAND = 4.0
 
 # Hardware compensation for the left/right axis.
@@ -105,7 +106,7 @@ def apply_servo4_side_compensation(target_angles, phi, theta):
 
     return [clamp(angle) for angle in compensated]
 
-class RobotController: # bruh
+class RobotController:
     SERVO_CHANNELS = [0, 4, 8, 12]
 
     def __init__(self, model, lp=7.125, l1=6.20, l2=4.50, lb=4.00, servo_channels=None):
@@ -227,7 +228,7 @@ class RobotController: # bruh
         target_angles = apply_servo4_side_compensation(target_angles, phi, theta)
         self.set_motor_angles(*target_angles, rate_limit=True)
 
-    def return_to_neutral(self, h=None, rate_limit=True): #comment
+    def return_to_neutral(self, h=None, rate_limit=True):
         if h is None:
             h = self.robot.h
         self.robot.solve_inverse_kinematics_spherical(0.0, 0.0, h)
