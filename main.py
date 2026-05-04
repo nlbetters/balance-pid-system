@@ -31,10 +31,10 @@ beta = 2.0
 CONTROL_HEIGHT = 9.0
 # Main response tuning.
 # Increase COMMAND_THETA_GAIN or MAX_COMMAND_THETA if the platform still feels weak.
-COMMAND_THETA_GAIN = 2.6
-MAX_COMMAND_THETA = 18.0
-MIN_ACTIVE_THETA = 0.20
-PIXEL_DEADBAND = 4.0
+COMMAND_THETA_GAIN = 3.1
+MAX_COMMAND_THETA = 22.0
+MIN_ACTIVE_THETA = 0.35
+PIXEL_DEADBAND = 3.5
 COMMAND_PHI_OFFSET_DEG = 0.0
 INVERT_X_RESPONSE = True
 INVERT_Y_RESPONSE = True
@@ -43,25 +43,25 @@ INVERT_Y_RESPONSE = True
 # Small errors get a gentle response. Large errors get a much stronger response.
 NONLINEAR_RESPONSE_ENABLED = True
 INNER_RESPONSE_SCALE = 0.35
-OUTER_RESPONSE_SCALE = 1.90
-ERROR_FOR_FULL_RESPONSE = 55.0
-RESPONSE_CURVE_EXPONENT = 1.7
+OUTER_RESPONSE_SCALE = 2.60
+ERROR_FOR_FULL_RESPONSE = 42.0
+RESPONSE_CURVE_EXPONENT = 1.45
 
 # Direct camera-error control is easier to tune than the polar PID direction while testing.
 # Screen left/right error maps to servo pair 4/12. Screen up/down error maps to servo pair 0/8.
 USE_DIRECT_ERROR_CONTROL = True
-DIRECT_X_TO_LR_GAIN = 0.060
-DIRECT_Y_TO_UD_GAIN = 0.030
+DIRECT_X_TO_LR_GAIN = 0.080
+DIRECT_Y_TO_UD_GAIN = 0.040
 DIRECT_LR_SIGN = -1.0
 DIRECT_UD_SIGN = -1.0
 
 # Velocity damping.
 # The platform angle controls ball acceleration, so position-only control overshoots.
-# These terms brake the ball based on how fast it is moving in the camera frame.
+# These terms brake the ball based on how fast it is moving in the camera frame. 
 VELOCITY_DAMPING_ENABLED = True
-VELOCITY_X_TO_LR_GAIN = 0.0040
-VELOCITY_Y_TO_UD_GAIN = 0.0030
-MAX_VELOCITY_PIXELS_PER_SECOND = 300.0
+VELOCITY_X_TO_LR_GAIN = 0.0035
+VELOCITY_Y_TO_UD_GAIN = 0.0025
+MAX_VELOCITY_PIXELS_PER_SECOND = 350.0
 
 # Axis response tuning.
 # In the camera view, servo motors 4 and 12 are the left/right motors.
