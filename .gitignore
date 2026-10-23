@@ -1,0 +1,10 @@
+# python junk
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# editor / os stuff
+.vscode/
+.idea/
+.DS_Store

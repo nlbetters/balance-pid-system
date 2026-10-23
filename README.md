@@ -43,8 +43,10 @@ If the camera does not confidently detect the ball, the controller resets and se
 | `PID.py` | Contains the PID-style controller logic and output smoothing. |
 | `controller.py` | Sends servo commands and maps inverse kinematics output to motor angles. |
 | `robotKinematics.py` | Calculates the 4-arm platform inverse kinematics. |
-| `GUI.py` | Optional visualization/debug interface. |
-| `app.py` | Optional app/server interface depending on the setup. |
+| `GUI.py` | Optional PyQt 3D visualization of the platform kinematics. |
+| `app.py` | Optional Flask web interface (`templates/`, `static/`) for adjusting the platform from a browser on port 8000. |
+| `tests/` | Automated camera tracking test. |
+| `tools/` | Manual camera and servo check scripts. |
 
 ## Camera Tracking
 
@@ -203,25 +205,23 @@ DIRECT_UD_SIGN
 
 If one servo moves the wrong way, adjust `SERVO_DIRECTIONS` in `controller.py`.
 
-## Verification Tests
+## Tests and Hardware Tools
 
-Run servo mapping checks with:
-
-```bash
-python -m unittest tests.test_servo_channels
-```
-
-Run camera checks with:
+Run the camera tracking test (it skips itself if no camera is connected):
 
 ```bash
-python -m unittest tests.test_camera
+python3 -m unittest tests.test_camera_tracking
 ```
 
-Run a quick hardware smoke test with:
+The `tools/` folder has scripts for checking the hardware by hand on the Pi:
 
-```bash
-python verify_system.py
-```
+| Script | What it does |
+|---|---|
+| `tools/camera_preview.py` | Shows the raw camera feed. Press `q` to quit. |
+| `tools/camera_tracking_preview.py` | Shows the camera feed with the detected ball drawn on it. |
+| `tools/servo_sweep.py` | Moves each servo through a few angles so you can check channel mapping and direction. |
+
+Run them from the project root, e.g. `python3 tools/servo_sweep.py`.
 
 ## Notes
 
